@@ -3,16 +3,18 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import tsConfigPaths from "vite-tsconfig-paths";
+import { nitro } from "nitro/vite";
 
-// Configuration Vite autonome : aucune dépendance à Lovable.
-// Le serveur personnalisé conserve la page d'erreur SSR d'AcreMap.
+// Configuration Vite autonome pour le déploiement Vercel avec Nitro.
+// Le serveur personnalisé conserve la gestion d'erreurs SSR d'AcreMap.
 export default defineConfig({
   plugins: [
+    tailwindcss(),
     tanstackStart({
       server: { entry: "server" },
     }),
+    nitro(),
     react(),
-    tailwindcss(),
     tsConfigPaths(),
   ],
 });
