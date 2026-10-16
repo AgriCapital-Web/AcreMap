@@ -43,9 +43,9 @@
     "@supabase/supabase-js": "^2.112.3",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/react-query": "^5.83.0",
-    "@tanstack/react-router": "^1.168.25",
-    "@tanstack/react-start": "^1.167.50",
-    "@tanstack/router-plugin": "^1.167.28",
+    "@tanstack/react-router": "1.168.25",
+    "@tanstack/react-start": "1.167.50",
+    "@tanstack/router-plugin": "1.167.28",
     "@tomtom-international/web-sdk-maps": "^6.25.0",
     "@turf/turf": "^7.3.5",
     "@types/leaflet": "^1.9.21",
@@ -86,7 +86,7 @@
     "@types/proj4": "^2.19.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "@vitejs/plugin-react": "^5.0.4",
+    "@vitejs/plugin-react": "5.2.0",
     "eslint": "^9.32.0",
     "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.2.6",
@@ -96,7 +96,7 @@
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "^8.3.4"
+    "vite": "7.3.2"
   },
   "overrides": {
     "seroval": "^1.6.2",
