@@ -49,7 +49,8 @@ function intersectSafe(a: AnyPoly, b: AnyPoly): AnyPoly | null {
   try { return turf.intersect(turf.featureCollection([a, b])) as AnyPoly | null; } catch { return null; }
 }
 function differenceSafe(a: AnyPoly, b: AnyPoly): AnyPoly | null {
-  try { return turf.difference(turf.featureCollection([a, b])) as AnyPoly | null; } catch { return null; }
+  try { return turf.difference(turf.featureCollection([a, b])) as AnyPoly | null; }
+  catch { return a; }
 }
 function boxAlong(bbox: number[], axis: Axis, from: number, to: number): Feature<Polygon> {
   const [minX, minY, maxX, maxY] = bbox;
@@ -96,7 +97,7 @@ function bandAt(poly: AnyPoly, axis: Axis, frac: number, widthM: number): { band
 }
 
 function splitPieces(f: AnyPoly | null): Pt[][] {
-  return extractPolys(f).filter((p) => p.length >= 3 && polygonAreaM2(p) > 20);
+  return extractPolys(f).filter((p) => p.length >= 3 && Number.isFinite(polygonAreaM2(p)) && polygonAreaM2(p) > 0.5);
 }
 
 /* ------------------------------ normalisation ------------------------------ */
@@ -149,8 +150,21 @@ export interface EngineInput {
 
 /** Construit un plan réel à partir d'un périmètre GPS levé. */
 export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
-  const norm = makeNormalizer(perimeter);
+  const cleanPerimeter = perimeter.filter((p, i, pts) =>
+    Number.isFinite(p.lat) && Number.isFinite(p.lng) && p.lat >= -90 && p.lat <= 90 && p.lng >= -180 && p.lng <= 180 &&
+    (i === 0 || p.lat !== pts[i - 1].lat || p.lng !== pts[i - 1].lng),
+  );
+  if (cleanPerimeter.length > 3 && cleanPerimeter[0].lat === cleanPerimeter.at(-1)!.lat && cleanPerimeter[0].lng === cleanPerimeter.at(-1)!.lng) cleanPerimeter.pop();
+  if (cleanPerimeter.length < 3) throw new Error("Le relevé doit contenir au moins trois points GPS distincts.");
+  perimeter = cleanPerimeter;
+  const source = featureOf(perimeter);
+  if (!turf.booleanValid(source)) throw new Error("Le périmètre GPS est invalide ou se croise. Corrigez les points du relevé.");
   const totalM2 = polygonAreaM2(perimeter);
+  if (!Number.isFinite(totalM2) || totalM2 <= 1) throw new Error("La superficie du périmètre est nulle ou invalide.");
+  if (!Number.isFinite(cfg.cibleHa) || cfg.cibleHa <= 0) throw new Error("La superficie cible doit être strictement positive.");
+  if (cfg.voiePrincipale && (!Number.isFinite(cfg.largeurVoieM) || cfg.largeurVoieM <= 0)) throw new Error("La largeur de la voie principale doit être positive.");
+  if (cfg.voiesSecondaires && cfg.nbVoiesSec > 0 && (!Number.isFinite(cfg.largeurVoieSecM) || cfg.largeurVoieSecM <= 0)) throw new Error("La largeur des voies secondaires doit être positive.");
+  const norm = makeNormalizer(perimeter);
   const cibleM2 = Math.max(100, Math.round(cfg.cibleHa * 10_000));
   const axis = resolveAxis(cfg, perimeter);
 
@@ -163,7 +177,8 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
     const voieAxis: Axis = cfg.orientationVoie === "verticale" ? "vertical"
       : cfg.orientationVoie === "horizontale" ? "horizontal"
       : perpendicular(axis);
-    const frac = cfg.positionVoie === "laterale" ? 0.15 : cfg.positionVoie === "centrale" ? 0.5 : 0.35;
+    const frac = cfg.positionVoie === "laterale" ? 0.15
+      : cfg.positionVoie === "centrale" || cfg.positionVoie === "traversante" ? 0.5 : 0.35;
     const { band, rest } = bandAt(working, voieAxis, frac, cfg.largeurVoieM);
     for (const p of splitPieces(band)) {
       voies.push({ kind: "principale", largeurM: cfg.largeurVoieM, poly: norm(p), geo: p });
@@ -197,7 +212,7 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
       lots.push({
         code: "RES", part: "proprietaire", kind: "reserve",
         poly: norm(g), geo: g, bornes: bornesFor("RES", g),
-        cibleM2: cfg.reserveM2, reelM2: Math.round(a), conforme: true,
+        cibleM2: cfg.reserveM2, reelM2: Math.round(a), conforme: Math.abs(a - cfg.reserveM2) <= TOLERANCE_M2,
         label: `RÉSERVE ${cfg.familleNom.toUpperCase()} — ${(a / 10000).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ha`,
       });
     }
@@ -216,7 +231,7 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
         lots.push({
           code: pc.id, part: "ac", kind: "collecte",
           poly: norm(g), geo: g, bornes: bornesFor(pc.id, g),
-          cibleM2: pc.areaM2, reelM2: Math.round(a), conforme: true,
+          cibleM2: pc.areaM2, reelM2: Math.round(a), conforme: Math.abs(a - pc.areaM2) <= TOLERANCE_M2,
           label: `${pc.type === "principal" ? "PC PRINCIPAL" : "PC SECONDAIRE"} — ${Math.round(a).toLocaleString("fr-FR")} m²`,
         });
       }
@@ -232,7 +247,7 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
   for (const bloc of blocs) {
     let rem: AnyPoly | null = featureOf(bloc);
     let guard = 0;
-    while (rem && guard < 400) {
+    while (rem && guard < 10_000) {
       guard++;
       const remArea = areaOf(rem);
       if (remArea < cibleM2 + 1) break;
@@ -250,26 +265,31 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
       });
       // Les morceaux détachés par un découpage concave rejoignent les résiduels.
       pieces.slice(1).forEach((p) => residuels.push(p));
-      if (Math.abs(area - cibleM2) > cibleM2 * 0.5) break;
       rem = rest;
+      if (Math.abs(area - cibleM2) > cibleM2 * 0.5) break;
     }
     splitPieces(rem).forEach((p) => residuels.push(p));
   }
 
   // --- Partage AC / Propriétaire -----------------------------------------
   if (cfg.partageActif && utiles.length) {
-    const nbAc = Math.round((utiles.length * cfg.partAcPct) / 100);
-    const ordered = cfg.organisationPartage === "blocs"
-      ? utiles
-      : [...utiles].sort((a, b) => a.code.localeCompare(b.code));
-    ordered.forEach((l, i) => { l.part = i < nbAc ? "ac" : "proprietaire"; });
+    const ordered = cfg.organisationPartage === "blocs" ? [...utiles] : [...utiles].sort((a, b) => a.code.localeCompare(b.code));
+    const pct = Math.max(0, Math.min(100, Number.isFinite(cfg.partAcPct) ? cfg.partAcPct : 0));
+    const targetAcM2 = ordered.reduce((sum, lot) => sum + lot.reelM2, 0) * pct / 100;
+    let cumulative = 0, bestCount = 0, bestError = Math.abs(targetAcM2);
+    for (let i = 0; i < ordered.length; i++) {
+      cumulative += ordered[i].reelM2;
+      const error = Math.abs(cumulative - targetAcM2);
+      if (error < bestError) { bestError = error; bestCount = i + 1; }
+    }
+    ordered.forEach((lot, i) => { lot.part = i < bestCount ? "ac" : "proprietaire"; });
   }
 
   lots.push(...utiles);
 
   // --- Reliquats ----------------------------------------------------------
   residuels
-    .filter((p) => polygonAreaM2(p) > Math.max(200, cibleM2 * 0.02))
+    .filter((p) => polygonAreaM2(p) > 0.5)
     .sort((a, b) => polygonAreaM2(b) - polygonAreaM2(a))
     .forEach((p, i) => {
       const code = `R${String(i + 1).padStart(2, "0")}`;
@@ -285,6 +305,9 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
   // --- Scores -------------------------------------------------------------
   const nonConformes = utiles.filter((l) => !l.conforme).length;
   const residuelM2 = residuels.reduce((s, p) => s + polygonAreaM2(p), 0);
+  const allocatedM2 = lots.reduce((sum, lot) => sum + (lot.geo ? polygonAreaM2(lot.geo) : 0), 0) +
+    voies.reduce((sum, voie) => sum + (voie.geo ? polygonAreaM2(voie.geo) : 0), 0);
+  const balanceErrorM2 = Math.round(totalM2 - allocatedM2);
   const superficies = utiles.length
     ? Math.round(100 - (nonConformes / utiles.length) * 100)
     : 0;
@@ -308,9 +331,11 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
     parcelleGeo: perimeter,
     axis,
     score,
-    conforme: nonConformes === 0 && utiles.length > 0,
+    conforme: nonConformes === 0 && utiles.length > 0 && Math.abs(balanceErrorM2) <= TOLERANCE_M2,
     cibleM2,
     totalM2: Math.round(totalM2),
+    allocatedM2: Math.round(allocatedM2),
+    balanceErrorM2,
     createdAt: Date.now(),
   };
 }

@@ -12,12 +12,14 @@ async function assertAdmin(supabase: any, userId: string) {
     supabase.from("user_roles").select("id").eq("user_id", userId).eq("role", "admin").maybeSingle(),
     supabase.from("profiles").select("disabled").eq("id", userId).maybeSingle(),
   ]);
-  if (!roleRow || profile?.disabled) throw new Error("Réservé à l'administrateur");
+  if (!roleRow || !profile || profile.disabled) throw new Error("Réservé à l'administrateur");
 }
 
 function randomPassword(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789abcdefghjkmnpqrstuvwxyz";
-  return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  const bytes = new Uint32Array(12);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => chars[value % chars.length]).join("");
 }
 
 export const listUsersAdmin = createServerFn({ method: "GET" })
@@ -25,19 +27,24 @@ export const listUsersAdmin = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const [{ data: profiles }, { data: roles }, listed] = await Promise.all([
+    const [profilesResult, rolesResult, listed] = await Promise.all([
       supabaseAdmin.from("profiles").select("id, full_name, username, must_change_password, disabled, created_at"),
       supabaseAdmin.from("user_roles").select("user_id, role"),
       supabaseAdmin.auth.admin.listUsers({ perPage: 200 }),
     ]);
+    if (profilesResult.error) throw new Error(profilesResult.error.message);
+    if (rolesResult.error) throw new Error(rolesResult.error.message);
+    if (listed.error) throw new Error(listed.error.message);
+    const profiles = profilesResult.data ?? [];
+    const roles = rolesResult.data ?? [];
     const emailById = new Map((listed.data?.users ?? []).map((u) => [u.id, u.email]));
     const rolesById = new Map<string, string[]>();
-    (roles ?? []).forEach((r) => {
+    roles.forEach((r) => {
       const arr = rolesById.get(r.user_id) ?? [];
       arr.push(r.role as string);
       rolesById.set(r.user_id, arr);
     });
-    return (profiles ?? []).map((p) => ({
+    return profiles.map((p) => ({
       id: p.id,
       fullName: p.full_name,
       username: p.username,
@@ -69,16 +76,24 @@ export const createUserAdmin = createServerFn({ method: "POST" })
     });
     if (error || !created.user) throw new Error(error?.message ?? "Création échouée");
     // Override profile (trigger creates a default one) with the chosen values and force change-password.
-    await supabaseAdmin.from("profiles").upsert({
-      id: created.user.id,
-      full_name: data.fullName,
-      username: data.username,
-      must_change_password: true,
-      disabled: false,
+    const profileWrite = await supabaseAdmin.from("profiles").upsert({
+      id: created.user.id, full_name: data.fullName, username: data.username,
+      must_change_password: true, disabled: false,
     });
-    // Clear default 'agent' role and assign chosen role
-    await supabaseAdmin.from("user_roles").delete().eq("user_id", created.user.id);
-    await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: data.role });
+    if (profileWrite.error) {
+      await supabaseAdmin.auth.admin.deleteUser(created.user.id);
+      throw new Error(profileWrite.error.message);
+    }
+    const roleClear = await supabaseAdmin.from("user_roles").delete().eq("user_id", created.user.id);
+    if (roleClear.error) {
+      await supabaseAdmin.auth.admin.deleteUser(created.user.id);
+      throw new Error(roleClear.error.message);
+    }
+    const roleWrite = await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: data.role });
+    if (roleWrite.error) {
+      await supabaseAdmin.auth.admin.deleteUser(created.user.id);
+      throw new Error(roleWrite.error.message);
+    }
     return { id: created.user.id, email: data.email, tempPassword };
   });
 
@@ -88,8 +103,17 @@ export const setUserRoleAdmin = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("user_roles").delete().eq("user_id", data.userId);
-    await supabaseAdmin.from("user_roles").insert({ user_id: data.userId, role: data.role });
+    const { data: previousRoles, error: readError } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", data.userId);
+    if (readError) throw new Error(readError.message);
+    const { error: deleteError } = await supabaseAdmin.from("user_roles").delete().eq("user_id", data.userId);
+    if (deleteError) throw new Error(deleteError.message);
+    const { error: insertError } = await supabaseAdmin.from("user_roles").insert({ user_id: data.userId, role: data.role });
+    if (insertError) {
+      if (previousRoles?.length) {
+        await supabaseAdmin.from("user_roles").insert(previousRoles.map((row: { role: string }) => ({ user_id: data.userId, role: row.role })));
+      }
+      throw new Error(insertError.message);
+    }
     return { ok: true };
   });
 
@@ -99,12 +123,17 @@ export const toggleUserDisabledAdmin = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("profiles").update({ disabled: data.disabled }).eq("id", data.userId);
-    // Revoke/restore the Supabase Auth account itself so existing tokens stop working.
+    const { data: previous, error: readError } = await supabaseAdmin.from("profiles").select("disabled").eq("id", data.userId).maybeSingle();
+    if (readError || !previous) throw new Error(readError?.message ?? "Profil introuvable.");
+    const { error: profileError } = await supabaseAdmin.from("profiles").update({ disabled: data.disabled }).eq("id", data.userId);
+    if (profileError) throw new Error(profileError.message);
     const { error } = await supabaseAdmin.auth.admin.updateUserById(data.userId, {
       ban_duration: data.disabled ? "876000h" : "none",
     });
-    if (error) throw new Error("Impossible de mettre à jour le compte");
+    if (error) {
+      await supabaseAdmin.from("profiles").update({ disabled: previous.disabled }).eq("id", data.userId);
+      throw new Error(error.message);
+    }
     return { ok: true };
   });
 
@@ -114,10 +143,16 @@ export const resetUserPasswordAdmin = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: previous, error: readError } = await supabaseAdmin.from("profiles").select("must_change_password").eq("id", data.userId).maybeSingle();
+    if (readError || !previous) throw new Error(readError?.message ?? "Profil introuvable.");
+    const { error: profileError } = await supabaseAdmin.from("profiles").update({ must_change_password: true }).eq("id", data.userId);
+    if (profileError) throw new Error(profileError.message);
     const tempPassword = randomPassword();
     const { error } = await supabaseAdmin.auth.admin.updateUserById(data.userId, { password: tempPassword });
-    if (error) throw new Error(error.message);
-    await supabaseAdmin.from("profiles").update({ must_change_password: true }).eq("id", data.userId);
+    if (error) {
+      await supabaseAdmin.from("profiles").update({ must_change_password: previous.must_change_password }).eq("id", data.userId);
+      throw new Error(error.message);
+    }
     return { tempPassword };
   });
 
@@ -138,13 +173,18 @@ export const updateUserAdmin = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin
-      .from("profiles")
-      .update({ full_name: data.fullName, username: data.username })
-      .eq("id", data.userId);
+    const { data: previous, error: readError } = await supabaseAdmin.from("profiles")
+      .select("full_name, username").eq("id", data.userId).maybeSingle();
+    if (readError || !previous) throw new Error(readError?.message ?? "Profil introuvable.");
+    const { error } = await supabaseAdmin.from("profiles")
+      .update({ full_name: data.fullName, username: data.username }).eq("id", data.userId);
     if (error) throw new Error(error.message);
-    await supabaseAdmin.auth.admin.updateUserById(data.userId, {
+    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(data.userId, {
       user_metadata: { full_name: data.fullName, username: data.username },
     });
+    if (authError) {
+      await supabaseAdmin.from("profiles").update({ full_name: previous.full_name, username: previous.username }).eq("id", data.userId);
+      throw new Error(authError.message);
+    }
     return { ok: true };
   });

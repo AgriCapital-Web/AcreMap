@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { db, isBrowser } from "@/lib/db";
+import { useAuth, hasRole } from "@/lib/auth";
 import { flushOutbox, migrateLocalToCloud, outboxCount, type MigrationProgress } from "@/lib/sync";
 
 export const Route = createFileRoute("/app/debug")({
@@ -14,6 +15,8 @@ type Counts = {
 };
 
 function DebugPage() {
+  const user = useAuth((state) => state.user);
+  const isAdmin = hasRole(user, "admin");
   const [counts, setCounts] = useState<Counts | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [raw, setRaw] = useState<string>("");
@@ -28,6 +31,7 @@ function DebugPage() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   async function load() {
+    if (!isAdmin) return;
     setError(null);
     if (!isBrowser()) return;
     try {
@@ -55,7 +59,7 @@ function DebugPage() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { if (isAdmin) void load(); }, [isAdmin]);
 
   async function deleteDb() {
     if (!confirm("⚠️ Supprimer définitivement la base locale acremap ? Toutes les mesures locales seront perdues.")) return;
@@ -93,6 +97,9 @@ function DebugPage() {
     void load();
   }
 
+  if (!isAdmin) return <div className="p-8 text-center text-muted-foreground">Réservé à l'administrateur.</div>;
+  const online = isBrowser() && navigator.onLine;
+
   return (
     <div className="p-4 lg:p-8 max-w-3xl mx-auto space-y-4">
       <h1 className="text-2xl font-bold">Diagnostic & synchronisation</h1>
@@ -104,7 +111,7 @@ function DebugPage() {
 
       <div className="bg-card rounded-xl p-4 shadow-card space-y-2 text-sm">
         <div><span className="text-muted-foreground">Bases IndexedDB :</span> <code>{dbList || "…"}</code></div>
-        <div><span className="text-muted-foreground">État réseau :</span> <b className={navigator.onLine ? "text-emerald-600" : "text-destructive"}>{navigator.onLine ? "En ligne" : "Hors-ligne"}</b></div>
+        <div><span className="text-muted-foreground">État réseau :</span> <b className={online ? "text-emerald-600" : "text-destructive"}>{online ? "En ligne" : "Hors-ligne"}</b></div>
         {error && (
           <div className="text-destructive bg-destructive/10 rounded-md p-2 text-xs"><b>Erreur :</b> {error}</div>
         )}

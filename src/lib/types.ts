@@ -86,6 +86,7 @@ export interface Lot {
   bornes?: { label: string; lat: number; lng: number }[];
   isReserve?: boolean;
   assigneeName?: string;
+  assigneeOwnerId?: string;
   assignedAt?: number;
   // --- Morcellement intelligent ---
   planId?: string | null;

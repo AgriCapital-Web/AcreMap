@@ -94,6 +94,7 @@ export interface Assignation {
   nom: string;
   contact: string;
   compte: string;
+  ownerId?: string;
 }
 
 export interface PlanLot {
@@ -135,6 +136,8 @@ export interface PlanResult {
   conforme: boolean;
   cibleM2: number;
   totalM2: number;
+  allocatedM2?: number;
+  balanceErrorM2?: number;
   createdAt: number;
 }
 

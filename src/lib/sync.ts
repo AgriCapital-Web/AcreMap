@@ -59,7 +59,7 @@ function mapLot(row: Lot, userId: string | null) {
     id: row.id, parcelle_id: row.parcelleId, measurement_id: row.measurementId || null,
     code: row.code, polygon: row.polygon as unknown, bornes: (row.bornes ?? []) as unknown,
     area_m2: row.areaM2, is_reserve: row.isReserve ?? false,
-    assignee_name: row.assigneeName ?? null, assigned_at: toIso(row.assignedAt),
+    assignee_name: row.assigneeName ?? null, assignee_owner_id: row.assigneeOwnerId ?? null, assigned_at: toIso(row.assignedAt),
     plan_id: row.planId ?? null,
     part: row.part ?? "proprietaire",
     kind: row.kind ?? "lot",
@@ -90,6 +90,17 @@ async function pushDelete(table: TableName, id: string): Promise<void> {
   if (error) throw error;
 }
 
+async function fetchAllRows(table: TableName): Promise<any[]> {
+  const all: any[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await (supabase.from(table) as any).select("*").order("id", { ascending: true }).range(offset, offset + 999);
+    if (error) throw error;
+    const page = (data ?? []) as any[];
+    all.push(...page);
+    if (page.length < 1000) break;
+  }
+  return all;
+}
 async function currentUserId(): Promise<string | null> {
   try {
     const { data } = await supabase.auth.getUser();
@@ -274,10 +285,9 @@ export async function pullFromCloud(): Promise<PullResult> {
     if (safeCloudRows.length) await bulkPut(safeCloudRows);
   }
 
-  const spsRes = await supabase.from("sps").select("*").limit(5000);
-  if (spsRes.error) throw spsRes.error;
-  if (spsRes.data) {
-    const rows: SP[] = spsRes.data.map((r) => ({
+  const spsData = await fetchAllRows("sps");
+  if (spsData) {
+    const rows: SP[] = spsData.map((r) => ({
       id: r.id, code: r.code, name: r.name,
       district: r.district ?? "", region: r.region ?? "", departement: r.departement ?? "",
       notes: r.notes ?? undefined, archivedAt: r.archived_at ? ts(r.archived_at) : null, createdAt: ts(r.created_at),
@@ -286,10 +296,9 @@ export async function pullFromCloud(): Promise<PullResult> {
     perTable.sps = rows.length; total += rows.length;
   }
 
-  const domRes = await supabase.from("domaines").select("*").limit(5000);
-  if (domRes.error) throw domRes.error;
-  if (domRes.data) {
-    const rows: Domaine[] = domRes.data.map((r) => ({
+  const domData = await fetchAllRows("domaines");
+  if (domData) {
+    const rows: Domaine[] = domData.map((r) => ({
       id: r.id, code: r.code, name: r.name, spId: r.sp_id,
       description: r.description ?? undefined, notes: r.notes ?? undefined,
       archivedAt: r.archived_at ? ts(r.archived_at) : null, createdAt: ts(r.created_at),
@@ -298,10 +307,9 @@ export async function pullFromCloud(): Promise<PullResult> {
     perTable.domaines = rows.length; total += rows.length;
   }
 
-  const parcRes = await supabase.from("parcelles").select("*").limit(5000);
-  if (parcRes.error) throw parcRes.error;
-  if (parcRes.data) {
-    const rows: Parcelle[] = parcRes.data.map((r) => ({
+  const parcData = await fetchAllRows("parcelles");
+  if (parcData) {
+    const rows: Parcelle[] = parcData.map((r) => ({
       id: r.id, code: r.code, name: (r as { name?: string | null }).name ?? undefined,
       ownerName: r.owner_name ?? "", ownerPhone: r.owner_phone ?? undefined,
       domaineId: r.domaine_id, conventionDate: ts(r.convention_date),
@@ -315,10 +323,9 @@ export async function pullFromCloud(): Promise<PullResult> {
     perTable.parcelles = rows.length; total += rows.length;
   }
 
-  const mRes = await supabase.from("measurements").select("*").limit(5000);
-  if (mRes.error) throw mRes.error;
-  if (mRes.data) {
-    const rows: Measurement[] = mRes.data.map((r) => ({
+  const mData = await fetchAllRows("measurements");
+  if (mData) {
+    const rows: Measurement[] = mData.map((r) => ({
       id: r.id, parcelleId: r.parcelle_id ?? undefined,
       createdBy: r.created_by ?? "", createdAt: ts(r.created_at),
       status: r.status as Measurement["status"],
@@ -336,10 +343,9 @@ export async function pullFromCloud(): Promise<PullResult> {
     perTable.measurements = rows.length; total += rows.length;
   }
 
-  const planRes = await supabase.from("morcellement_plans").select("*").limit(5000);
-  if (planRes.error) throw planRes.error;
-  if (planRes.data) {
-    const rows: MorcPlan[] = planRes.data.map((r) => ({
+  const planData = await fetchAllRows("morcellement_plans");
+  if (planData) {
+    const rows: MorcPlan[] = planData.map((r) => ({
       id: r.id, parcelleId: r.parcelle_id, measurementId: r.measurement_id ?? null,
       reference: r.reference ?? undefined,
       config: r.config, score: r.score,
@@ -351,15 +357,15 @@ export async function pullFromCloud(): Promise<PullResult> {
     perTable.plans = rows.length; total += rows.length;
   }
 
-  const lotRes = await supabase.from("lots").select("*").limit(5000);
-  if (lotRes.error) throw lotRes.error;
-  if (lotRes.data) {
-    const rows: Lot[] = lotRes.data.map((r) => ({
+  const lotData = await fetchAllRows("lots");
+  if (lotData) {
+    const rows: Lot[] = lotData.map((r) => ({
       id: r.id, parcelleId: r.parcelle_id, measurementId: r.measurement_id ?? "",
       code: r.code, polygon: (r.polygon ?? []) as Lot["polygon"],
       bornes: (r.bornes ?? []) as Lot["bornes"],
       areaM2: Number(r.area_m2 ?? 0), isReserve: r.is_reserve ?? false,
       assigneeName: r.assignee_name ?? undefined,
+      assigneeOwnerId: r.assignee_owner_id ?? undefined,
       assignedAt: r.assigned_at ? ts(r.assigned_at) : undefined,
       planId: r.plan_id ?? null,
       part: (r.part ?? "proprietaire") as Lot["part"],

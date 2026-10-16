@@ -1,12 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { publishMorcellementToCrm } from "@/lib/crm-integration.functions";
 import { PlanPreview } from "@/components/PlanPreview";
 import { SearchSelect } from "@/components/SearchSelect";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { db, isBrowser } from "@/lib/db";
+import { supabase } from "@/integrations/supabase/client";
 import { refOfficielle } from "@/lib/ref";
 import { syncNow } from "@/lib/sync";
 import { buildPlan } from "@/lib/morcellement-engine";
+import { buildGeometrePdf, buildPdfClient } from "@/lib/pdf";
+import { buildDxf } from "@/lib/dxf";
+import { buildShapefileZip } from "@/lib/shp";
+import { downloadBlob, toGeoJSON, toKML } from "@/lib/export";
 import type { Domaine, Lot, Measurement, MorcPlan, Parcelle, SP } from "@/lib/types";
 import {
   defaultConfig, ETAPES, TOLERANCE_M2,
@@ -31,6 +38,7 @@ interface StoredPlanPayload { cfg: MorcConfig; plan: PlanResult }
 
 function MorcellementPage() {
   const isMobile = useIsMobile();
+  const publishCrm = useServerFn(publishMorcellementToCrm);
 
   const [parcelles, setParcelles] = useState<Parcelle[]>([]);
   const [domaines, setDomaines] = useState<Domaine[]>([]);
@@ -47,8 +55,11 @@ function MorcellementPage() {
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
   const [mode, setMode] = useState<ApercuMode>("global");
+  const [pdfFormat, setPdfFormat] = useState<"a4" | "a3" | "a2" | "a1">("a3");
   const [selected, setSelected] = useState<string | null>(null);
   const [assigned, setAssigned] = useState<Record<string, Assignation>>({});
+  const [crmOwners, setCrmOwners] = useState<Array<{ id: string; full_name: string; phone: string | null; account_code: string | null }>>([]);
+  const [selectedOwnerId, setSelectedOwnerId] = useState("");
   const [assignFor, setAssignFor] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -64,6 +75,7 @@ function MorcellementPage() {
     if (!isBrowser()) return;
     void (async () => {
       const local = db();
+      try { const { data, error } = await (supabase as any).from("crm_landowners").select("id,full_name,phone,account_code").eq("active", true).order("full_name"); if (!error && data) setCrmOwners(data); } catch { /* CRM registry may not be connected yet. */ }
       const [p, d, s, m] = await Promise.all([
         local.parcelles.toArray(), local.domaines.toArray(),
         local.sps.toArray(), local.measurements.toArray(),
@@ -121,7 +133,7 @@ function MorcellementPage() {
       const lots = await local.lots.where("parcelleId").equals(parcelleId).toArray();
       const map: Record<string, Assignation> = {};
       lots.filter((l) => l.planId === stored.id && l.assigneeName).forEach((l) => {
-        map[l.code] = { nom: l.assigneeName ?? "", contact: l.assigneeContact ?? "", compte: l.assigneeAccount ?? "" };
+        map[l.code] = { nom: l.assigneeName ?? "", contact: l.assigneeContact ?? "", compte: l.assigneeAccount ?? "", ownerId: (l as any).assigneeOwnerId ?? "" };
       });
       setAssigned(map);
     })();
@@ -176,6 +188,7 @@ function MorcellementPage() {
         label: l.label,
         targetAreaM2: l.cibleM2,
         assigneeName: a?.nom,
+        assigneeOwnerId: a?.ownerId || undefined,
         assigneeContact: a?.contact,
         assigneeAccount: a?.compte,
         assignedAt: a ? Date.now() : undefined,
@@ -202,16 +215,41 @@ function MorcellementPage() {
       if (i === ETAPES.length - 1) {
         try {
           const result = buildPlan({ perimeter, config: cfg });
+          const nextAssigned = { ...assigned };
+          const selectedOwner = crmOwners.find((owner) => owner.id === selectedOwnerId);
+          if (selectedOwner) result.lots.filter((item) => item.kind === "lot" && item.part === "proprietaire").forEach((item) => {
+            nextAssigned[item.code] = { nom: selectedOwner.full_name, contact: selectedOwner.phone ?? "", compte: selectedOwner.account_code ?? "", ownerId: selectedOwner.id };
+          });
+          setAssigned(nextAssigned);
           setPlan(result);
           setPhase("resultat");
           setSaving(true);
-          void persist(result, cfg, assigned)
-            .then(() => notify("Plan enregistré — disponible hors ligne et synchronisé au retour du réseau."))
+          void persist(result, cfg, nextAssigned)
+            .then(async (savedId) => {
+              if (savedId && navigator.onLine) {
+                try {
+                  const webhookResult = await publishCrm({ data: {
+                    plan: { id: savedId, parcelle_id: parcelle.id, measurement_id: releve.id, reference, status: "draft", updated_at: new Date().toISOString(), owner_id: selectedOwnerId || null },
+                    lots: result.lots.map((item) => ({
+                      id: savedId + ":" + item.code, plan_id: savedId, parcelle_id: parcelle.id, measurement_id: releve.id,
+                      code: item.code, polygon: item.geo ?? [], area_m2: item.reelM2, target_area_m2: item.cibleM2,
+                      part: item.part, kind: item.kind, label: item.label ?? null,
+                      assignee_owner_id: nextAssigned[item.code]?.ownerId ?? null,
+                      assignee_name: nextAssigned[item.code]?.nom ?? null,
+                      assignee_contact: nextAssigned[item.code]?.contact ?? null,
+                      assignee_account: nextAssigned[item.code]?.compte ?? null,
+                    })),
+                  } });
+                  if (!webhookResult.sent) { notify("Plan enregistré ; webhook CRM non configuré sur le serveur."); return; }
+                } catch { notify("Plan enregistré localement ; envoi webhook CRM à vérifier ou à relancer."); return; }
+              }
+              notify("Plan enregistré — disponible hors ligne et synchronisé au retour du réseau.");
+            })
             .catch(() => notify("Plan calculé, enregistrement en attente de réseau."))
             .finally(() => setSaving(false));
-        } catch {
+        } catch (error) {
           setPhase("config");
-          notify("Le découpage n'a pas pu être calculé sur ce relevé.");
+          notify(error instanceof Error ? error.message : "Le découpage n'a pas pu être calculé sur ce relevé.");
         }
       }
     }, 320 * (i + 1)));
@@ -221,15 +259,83 @@ function MorcellementPage() {
     const next = { ...assigned, [code]: a };
     setAssigned(next);
     setAssignFor(null);
+    if (!parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant de synchroniser les assignations."); return; }
     if (plan) {
       setSaving(true);
-      try { await persist(plan, cfg, next); notify(`Lot ${code} assigné à ${a.nom}.`); }
+      try {
+        const savedId = await persist(plan, cfg, next);
+        if (savedId && navigator.onLine) {
+          const webhookResult = await publishCrm({ data: {
+            plan: { id: savedId, parcelle_id: parcelle.id, measurement_id: releve?.id ?? "", reference, status: "draft", updated_at: new Date().toISOString(), owner_id: selectedOwnerId || Object.values(next).find((item) => item.ownerId)?.ownerId || null },
+            lots: plan.lots.map((item) => ({
+              id: savedId + ":" + item.code, plan_id: savedId, parcelle_id: parcelle.id, measurement_id: releve?.id ?? "",
+              code: item.code, polygon: item.geo ?? [], area_m2: item.reelM2, target_area_m2: item.cibleM2,
+              part: item.part, kind: item.kind, label: item.label ?? null,
+              assignee_owner_id: next[item.code]?.ownerId ?? null,
+              assignee_name: next[item.code]?.nom ?? null,
+              assignee_contact: next[item.code]?.contact ?? null,
+              assignee_account: next[item.code]?.compte ?? null,
+            })),
+          } });
+          if (!webhookResult.sent) { notify(`Lot ${code} assigné ; webhook CRM non configuré sur le serveur.`); return; }
+        }
+        notify(`Lot ${code} assigné à ${a.nom}.`);
+      }
       catch { notify(`Lot ${code} assigné — envoi au cloud en attente.`); }
       finally { setSaving(false); }
     }
   };
 
-  const demoExport = (name: string) => notify(`Export préparé — ${name}`);
+  const exportLots = useCallback((selection: "all" | "entreprise" | "client" = "all", focusCode?: string): Lot[] => {
+    if (!plan) return [];
+    return plan.lots.filter((item) => selection !== "entreprise" || item.kind !== "lot" || item.part === "ac")
+      .filter((item) => selection !== "client" || item.code === focusCode).filter((item) => (item.geo?.length ?? 0) >= 3)
+      .map((item) => ({
+        id: `${planId ?? "preview"}-${item.code}`, parcelleId: parcelle?.id ?? "", measurementId: releve?.id ?? "",
+        code: item.code, polygon: (item.geo ?? []).map((p) => ({ lat: p.lat, lng: p.lng })), areaM2: item.reelM2,
+        bornes: item.bornes, isReserve: item.kind !== "lot", part: item.part, kind: item.kind, label: item.label,
+        targetAreaM2: item.cibleM2, assigneeName: assigned[item.code]?.nom, assigneeContact: assigned[item.code]?.contact,
+        assigneeAccount: assigned[item.code]?.compte,
+      }));
+  }, [plan, planId, parcelle, releve, assigned]);
+  const exportVoies = useMemo(() => (plan?.voies ?? []).map((v) => v.geo ?? []).filter((p) => p.length >= 3), [plan]);
+  const exportPdf = (kind: "global" | "entreprise" | "client") => {
+    if (!plan || !parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant l'export."); return; }
+    const focusCode = selected ?? lots[0]?.code;
+    if (kind === "client" && !focusCode) { notify("Aucun lot disponible pour le plan client."); return; }
+    try {
+      const selection = kind === "entreprise" ? "entreprise" : kind === "client" ? "client" : "all";
+      const pdfLots = exportLots(selection, focusCode);
+      const blob = kind === "client"
+        ? buildPdfClient({ measurement: releve, parcelle, domaine, sp, lots: pdfLots, voie: exportVoies, focusLotCode: focusCode })
+        : buildGeometrePdf({ measurement: releve, parcelle, domaine, sp, lots: pdfLots, voie: exportVoies, operatorName: "AcreMap", format: pdfFormat });
+      downloadBlob(blob, `${reference}-plan-${kind}.pdf`, "application/pdf"); notify("PDF généré et téléchargé.");
+    } catch (error) { notify(`Échec de l'export PDF : ${error instanceof Error ? error.message : "erreur inconnue"}`); }
+  };
+  const exportTable = () => {
+    if (!plan) { notify("Générez d'abord un plan."); return; }
+    const rows = [["Code","Type","Part","Superficie cible (m²)","Superficie mesurée (m²)","Écart (m²)","Attributaire","Contact","Compte"],
+      ...plan.lots.map((l) => [l.code,l.kind,l.part,l.cibleM2,l.reelM2,l.reelM2-l.cibleM2,assigned[l.code]?.nom ?? "",assigned[l.code]?.contact ?? "",assigned[l.code]?.compte ?? ""])];
+    const csv = rows.map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g,'""')}"`).join(";")).join("\r\n");
+    downloadBlob(`\uFEFF${csv}`, `${reference}-tableau-lots.csv`, "text/csv;charset=utf-8"); notify("Tableau CSV généré et téléchargé.");
+  };
+  const exportGeo = () => {
+    if (!plan || !parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant l'export."); return; }
+    downloadBlob(JSON.stringify(toGeoJSON(parcelle, releve, exportLots()), null, 2), `${reference}.geojson`, "application/geo+json"); notify("GeoJSON généré et téléchargé.");
+  };
+  const exportKml = () => {
+    if (!plan || !parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant l'export."); return; }
+    downloadBlob(toKML(parcelle, releve, exportLots()), `${reference}.kml`, "application/vnd.google-earth.kml+xml"); notify("KML généré et téléchargé.");
+  };
+  const exportDxf = () => {
+    if (!plan || !parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant l'export."); return; }
+    downloadBlob(buildDxf({ measurement: releve, parcelle, lots: exportLots(), voie: exportVoies }), `${reference}.dxf`, "application/dxf"); notify("DXF généré et téléchargé.");
+  };
+  const exportShapefile = async () => {
+    if (!plan || !parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant l'export."); return; }
+    try { downloadBlob(await buildShapefileZip({ measurement: releve, parcelle, lots: exportLots() }), `${reference}-shapefile.zip`, "application/zip"); notify("Shapefile ZIP généré et téléchargé."); }
+    catch (error) { notify(`Échec de l'export Shapefile : ${error instanceof Error ? error.message : "erreur inconnue"}`); }
+  };
 
   const parcelleOptions = parcelles.map((p) => ({
     value: p.id,
@@ -269,6 +375,13 @@ function MorcellementPage() {
               <SearchSelect value={measurementId} options={releveOptions} onChange={setMeasurementId}
                 placeholder={parcelleId ? "Choisir un relevé…" : "Choisir d'abord une parcelle"}
                 disabled={!parcelleId} emptyLabel="Aucun relevé pour cette parcelle" />
+            </Field>
+            <Field label="Propriétaire foncier (CRM)">
+              <select className="w-full px-3 py-2 rounded-lg border bg-background text-sm" value={selectedOwnerId} onChange={(e) => setSelectedOwnerId(e.target.value)}>
+                <option value="">Sélectionner un propriétaire synchronisé…</option>
+                {crmOwners.map((owner) => <option key={owner.id} value={owner.id}>{owner.full_name}{owner.account_code ? " — " + owner.account_code : ""}</option>)}
+              </select>
+              <p className="text-[11px] text-muted-foreground">Les lots de la part propriétaire seront associés automatiquement à cette fiche CRM. Une assignation peut être modifiée lot par lot.</p>
             </Field>
             <Row k="Référence" v={reference} />
             <Row k="Superficie levée" v={releve ? `${(releve.areaM2 / 10000).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ha` : "—"} />
@@ -530,7 +643,7 @@ function MorcellementPage() {
                 : "bg-destructive/10 border-destructive/30 text-destructive"}`}>
                 {plan.conforme
                   ? `Résultat optimisé — ${lots.length} lots conformes à ±${TOLERANCE_M2} m².`
-                  : `${nonConformes.length} lot(s) hors tolérance : ${nonConformes.map((l) => l.code).join(", ")}.`}
+                  : `${nonConformes.length} lot(s) hors tolérance : ${nonConformes.map((l) => l.code).join(", ")}. Écart du bilan surfacique (levée - attribuée) : ${plan.balanceErrorM2 ?? "non calculé"} m².`}
               </div>
 
               <section className="bg-card rounded-2xl shadow-card overflow-hidden">
@@ -616,20 +729,23 @@ function MorcellementPage() {
               <section className="bg-card rounded-2xl shadow-card p-4 space-y-3">
                 <h3 className="font-semibold">Exports</h3>
                 <div className="grid sm:grid-cols-2 gap-2">
-                  <Exp onClick={() => demoExport(`${reference} — plan global`)}
-                    t="PDF Plan Global" s="Cotes & coordonnées relatives" />
-                  <Exp onClick={() => demoExport(`${reference} — plan entreprise`)}
-                    t="PDF Plan Entreprise" s="Part AgriCapital · cotes & coordonnées" />
-                  <Exp onClick={() => demoExport(`${reference} — lot ${selected ?? lots[0]?.code ?? "—"}`)}
-                    t="PDF Plan Client" s={`Lot ${selected ?? lots[0]?.code ?? "—"} · cotes & coordonnées`} />
-                  <Exp onClick={() => demoExport(`${reference} — tableau des lots`)}
-                    t="Tableau des lots" s="Superficies, parts et assignations" />
+                  <Exp onClick={() => exportPdf("global")} t="PDF Plan Global" s="Cotes & coordonnées relatives" />
+                  <Exp onClick={() => exportPdf("entreprise")} t="PDF Plan Entreprise" s="Part AgriCapital · cotes & coordonnées" />
+                  <Exp onClick={() => exportPdf("client")} t="PDF Plan Client" s={`Lot ${selected ?? lots[0]?.code ?? "—"} · cotes & coordonnées`} />
+                  <Exp onClick={exportTable} t="Tableau des lots CSV" s="Superficies, parts et assignations" />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Format :</span>
-                  {["A4", "A3", "A2", "A1", "A0"].map((f) => (
-                    <span key={f} className="text-xs px-2 py-1 rounded-md border">{f}</span>
+                  <span className="text-xs text-muted-foreground">Format PDF :</span>
+                  {(["a4", "a3", "a2", "a1"] as const).map((format) => (
+                    <button key={format} type="button" aria-pressed={pdfFormat === format} onClick={() => setPdfFormat(format)}
+                      className={`text-xs px-2.5 py-1 rounded-md border ${pdfFormat === format ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>{format.toUpperCase()}</button>
                   ))}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                  <Exp onClick={exportGeo} t="GeoJSON" s="Géométries et attributs" />
+                  <Exp onClick={exportKml} t="KML" s="Google Earth" />
+                  <Exp onClick={exportDxf} t="DXF" s="AutoCAD / DAO" />
+                  <Exp onClick={() => { void exportShapefile(); }} t="Shapefile ZIP" s="SIG / QGIS" />
                 </div>
               </section>
             </>
@@ -641,6 +757,7 @@ function MorcellementPage() {
         <AssignDialog
           code={assignFor}
           initial={assigned[assignFor]}
+          owners={crmOwners}
           onClose={() => setAssignFor(null)}
           onSave={(a) => { void saveAssignation(assignFor, a); }}
         />
@@ -657,16 +774,24 @@ function MorcellementPage() {
 
 /* ------------------------------- sous-composants ------------------------------- */
 
-function AssignDialog({ code, initial, onClose, onSave }: {
-  code: string; initial?: Assignation; onClose: () => void; onSave: (a: Assignation) => void;
+function AssignDialog({ code, initial, owners, onClose, onSave }: {
+  code: string; initial?: Assignation; owners: Array<{ id: string; full_name: string; phone: string | null; account_code: string | null }>; onClose: () => void; onSave: (a: Assignation) => void;
 }) {
   const [nom, setNom] = useState(initial?.nom ?? "");
   const [contact, setContact] = useState(initial?.contact ?? "");
   const [compte, setCompte] = useState(initial?.compte ?? "");
+  const [ownerId, setOwnerId] = useState(initial?.ownerId ?? "");
+  const selectOwner = (id: string) => { setOwnerId(id); const owner = owners.find((item) => item.id === id); if (owner) { setNom(owner.full_name); setContact(owner.phone ?? ""); setCompte(owner.account_code ?? ""); } };
   return (
     <div className="fixed inset-0 z-50 bg-foreground/40 grid place-items-center p-4" onClick={onClose}>
       <div className="bg-card rounded-2xl shadow-elevated w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold">Assigner le lot {code}</h3>
+        {owners.length > 0 && <Field label="Propriétaire foncier du CRM">
+          <select className="w-full px-3 py-2 rounded-lg border bg-background text-sm" value={ownerId} onChange={(e) => selectOwner(e.target.value)}>
+            <option value="">Sélectionner un propriétaire enregistré dans le CRM…</option>
+            {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.full_name}{owner.account_code ? " — " + owner.account_code : ""}</option>)}
+          </select>
+        </Field>}
         <Field label="Nom complet">
           <input className="w-full px-3 py-2 rounded-lg border bg-background text-sm" value={nom} onChange={(e) => setNom(e.target.value)} />
         </Field>
@@ -678,7 +803,7 @@ function AssignDialog({ code, initial, onClose, onSave }: {
         </Field>
         <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="px-3 py-2 rounded-lg border text-sm">Annuler</button>
-          <button disabled={!nom.trim()} onClick={() => onSave({ nom: nom.trim(), contact, compte })}
+          <button disabled={!nom.trim()} onClick={() => onSave({ nom: nom.trim(), contact, compte, ownerId })}
             className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50">
             Assigner
           </button>
