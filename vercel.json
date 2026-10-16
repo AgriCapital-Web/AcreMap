@@ -3,5 +3,5 @@
   "buildCommand": "npm run build",
   "installCommand": "npm install",
   "ignoreCommand": "exit 1",
-  "framework": null
+  "framework": "tanstack-start"
 }
