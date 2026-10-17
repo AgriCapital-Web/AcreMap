@@ -17,7 +17,7 @@ const NAV: { to: string; label: string; short: string; icon: string; admin?: boo
   
   { to: "/app/morcellement", label: "Morcellement intelligent", short: "Morcellement", icon: "tree" },
   { to: "/app/hierarchie", label: "Hiérarchie", short: "Hiérarchie", icon: "tree" },
-  { to: "/app/assistant", label: "Assistant IA", short: "IA", icon: "sparkle" },
+  { to: "/app/assistant", label: "Assistant local", short: "Aide", icon: "sparkle" },
   { to: "/app/releves", label: "Relevés (historique)", short: "Relevés", icon: "check", admin: true },
   { to: "/app/validation", label: "Validation", short: "Valider", icon: "check", admin: true },
   { to: "/app/users", label: "Utilisateurs", short: "Comptes", icon: "users", admin: true },
@@ -33,6 +33,8 @@ function AppLayout() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [notifPerm, setNotifPerm] = useState<string>("default");
   const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => { setMenuOpen(false); }, [path]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -83,8 +85,9 @@ function AppLayout() {
           onClick={() => setMenuOpen(false)} />
       )}
       <aside className={`${isMeasureRoute ? "hidden" : menuOpen ? "fixed inset-y-0 left-0 z-50 flex w-72 shadow-2xl" : "hidden"} lg:static lg:z-auto lg:flex lg:w-64 lg:shadow-none flex-col bg-sidebar text-sidebar-foreground`}>
-        <div className="p-5 border-b border-sidebar-border">
-          <Logo className="h-9 w-9" showText />
+        <div className="p-4 border-b border-sidebar-border flex items-center justify-between gap-2">
+          <Logo className="h-9 w-9 min-w-0" showText />
+          <button type="button" aria-label="Fermer le menu" onClick={() => setMenuOpen(false)} className="lg:hidden rounded-md p-2 hover:bg-sidebar-accent"><Icon name="close" /></button>
         </div>
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto" onClick={() => setMenuOpen(false)}>
           {items.map((n) => {
@@ -129,13 +132,14 @@ function AppLayout() {
         </div>
       </aside>
 
-      <header className={`${isMeasureRoute ? "hidden" : "flex"} lg:hidden items-center justify-between p-3 bg-card border-b sticky top-0 z-30`}>
+      <div className="flex min-w-0 flex-1 flex-col">
+      <header className={`${isMeasureRoute ? "hidden" : "flex"} lg:hidden items-center justify-between gap-2 p-3 bg-card border-b sticky top-0 z-30`}>
         <button type="button" aria-label="Ouvrir le menu" aria-expanded={menuOpen}
           onClick={() => setMenuOpen(true)} className="inline-flex items-center justify-center rounded-lg border p-2"
           disabled={menuOpen}>
           <Icon name="menu" />
         </button>
-        <Logo className="h-8 w-8" showText />
+        <div className="min-w-0 flex-1 flex justify-center"><Logo className="h-8 w-8 max-w-full" showText /></div>
         <div className="flex items-center gap-2">
           {notifPerm !== "granted" && notifPerm !== "unsupported" && (
             <button onClick={async () => setNotifPerm(await requestNotificationPermission())}
@@ -146,9 +150,10 @@ function AppLayout() {
         </div>
       </header>
 
-      <main className="flex-1 min-w-0 min-h-screen">
+      <main className="flex-1 min-w-0 min-h-screen w-full max-w-full overflow-x-clip">
         <Outlet />
       </main>
+      </div>
 
       {/* Navigation mobile : exclusivement le tiroir latéral gauche. */}
     </div>
@@ -159,6 +164,7 @@ function Icon({ name }: { name: string }) {
   const common = "w-5 h-5";
   const stroke = "currentColor";
   switch (name) {
+    case "close": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>;
     case "menu": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
     case "settings": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19 13.5a7.2 7.2 0 0 0 0-3l2-1.5-2-3.5-2.4 1a7.2 7.2 0 0 0-2.6-1.5L13.5 2h-4L9 5a7.2 7.2 0 0 0-2.6 1.5l-2.4-1-2 3.5 2 1.5a7.2 7.2 0 0 0 0 3l-2 1.5 2 3.5 2.4-1A7.2 7.2 0 0 0 9 19l.5 3h4l.5-3a7.2 7.2 0 0 0 2.6-1.5l2.4 1 2-3.5z" transform="translate(0 0) scale(.9) translate(1.3 1.3)" /></svg>;
     case "home": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M3 12L12 4l9 8" /><path d="M5 10v10h14V10" /></svg>;
