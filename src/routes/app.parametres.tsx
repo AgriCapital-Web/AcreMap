@@ -44,7 +44,6 @@ function IntegrationSettingsPage() {
   const [showSecrets, setShowSecrets] = useState(false);
   const [copied, setCopied] = useState("");
   const [migrating, setMigrating] = useState(false);
-  const [migrationToken, setMigrationToken] = useState("");
 
   async function refresh() {
     setError("");
@@ -78,8 +77,7 @@ function IntegrationSettingsPage() {
     setError("");
     setSuccess("");
     try {
-      const result = await migrate({ data: { accessToken: migrationToken.trim() || undefined } });
-      setMigrationToken("");
+      const result = await migrate({ data: {} });
       setSuccess(result.message);
       await refresh();
     } catch (e) {
@@ -96,7 +94,6 @@ function IntegrationSettingsPage() {
     <header className="min-w-0">
       <p className="text-xs font-semibold uppercase tracking-wide text-primary">Administration</p>
       <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Paramètres & intégrations</h1>
-      <p className="mt-2 max-w-3xl text-sm text-muted-foreground sm:text-base">Configurez la synchronisation bidirectionnelle AcreMap ↔ CRM, vérifiez les secrets serveur et lancez les migrations de base de données.</p>
     </header>
 
     {error && <div role="alert" className="break-words rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
@@ -109,17 +106,11 @@ function IntegrationSettingsPage() {
           {migrating ? "Migration en cours…" : "Exécuter la migration"}
         </button>
       </div>
-      <p className="text-sm">La migration est versionnée, contrôlée côté serveur et conçue pour être relancée sans dupliquer les objets. Aucun SQL libre n’est accepté depuis le navigateur. Pour lancer la migration sans attendre une configuration Vercel, collez un jeton Supabase Management API autorisé sur le projet AcreMap ci-dessous : il est transmis uniquement à cette requête, n’est pas enregistré et est effacé après succès.</p>
-      <div className="min-w-0 space-y-2 rounded-lg bg-muted/60 p-3">
-        <label htmlFor="acremap-migration-token" className="block text-sm font-semibold">Jeton temporaire Supabase Management API (facultatif si déjà configuré sur Vercel)</label>
-        <input id="acremap-migration-token" type="password" autoComplete="off" spellCheck={false} value={migrationToken} onChange={(event) => setMigrationToken(event.target.value)} placeholder="Collez ici le jeton Supabase" className="w-full min-w-0 rounded-lg border bg-background px-3 py-2 text-sm" />
-        <p className="break-words text-xs text-muted-foreground">Créez le jeton dans les paramètres d’accès de Supabase. Utilisez un jeton limité au projet AcreMap et aux droits de base de données nécessaires. Ne le partagez pas et ne l’enregistrez pas dans un document.</p>
-      </div>
     </section>
 
     <section className="min-w-0 space-y-3 rounded-xl border bg-card p-3 sm:p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div><h2 className="text-lg font-semibold">2. État des variables serveur</h2><p className="mt-1 text-sm text-muted-foreground">Les valeurs ne sont jamais affichées ; seul leur état est contrôlé.</p></div>
+        <div><h2 className="text-lg font-semibold">2. Variables serveur</h2></div>
         <button onClick={() => void refresh()} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">Actualiser</button>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
@@ -128,41 +119,28 @@ function IntegrationSettingsPage() {
           <span className={`shrink-0 rounded-full px-2 py-1 text-xs ${checks?.[key] ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>{checks ? (checks[key] ? "Configurée" : "Manquante") : "Vérification…"}</span>
         </div>)}
       </div>
-      <p className="text-sm text-muted-foreground">Après avoir ajouté ou modifié une variable Vercel, un nouveau déploiement est nécessaire. Ne placez jamais la clé service role ou le jeton de gestion dans une variable <code>VITE_*</code>.</p>
     </section>
 
     <section className="min-w-0 space-y-3 rounded-xl border bg-card p-3 sm:p-5">
       <h2 className="text-lg font-semibold">3. Générer les secrets AcreMap ↔ CRM</h2>
-      <p className="text-sm text-muted-foreground">Les deux secrets sont générés localement dans cette page. Copiez-les immédiatement : ils ne sont pas sauvegardés automatiquement et ne peuvent pas être récupérés après rechargement.</p>
       <button onClick={generate} className="w-full rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground sm:w-auto">Générer une clé API et un secret HMAC</button>
       {showSecrets && <>
         <div className="min-w-0 space-y-2">
           <label className="block text-sm font-medium">ACREMAP_CRM_API_KEY</label>
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row"><input readOnly value={apiKey} className="min-w-0 w-full flex-1 rounded-lg border bg-muted px-3 py-2 font-mono text-xs" /><button onClick={() => void copy("api", apiKey)} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">{copied === "api" ? "Copié" : "Copier"}</button></div>
-          <p className="text-xs text-muted-foreground">Ajoutez cette valeur dans Vercel/AcreMap et dans CRM → Paramètres → AcreMap API → Clé API AcreMap.</p>
         </div>
         <div className="min-w-0 space-y-2">
           <label className="block text-sm font-medium">CRM_WEBHOOK_SECRET</label>
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row"><input readOnly value={webhookSecret} className="min-w-0 w-full flex-1 rounded-lg border bg-muted px-3 py-2 font-mono text-xs" /><button onClick={() => void copy("hmac", webhookSecret)} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">{copied === "hmac" ? "Copié" : "Copier"}</button></div>
-          <p className="text-xs text-muted-foreground">Ajoutez la même valeur dans Vercel/AcreMap et dans CRM → Paramètres → AcreMap API → Secret HMAC webhook.</p>
         </div>
       </>}
     </section>
 
     <section className="min-w-0 space-y-3 rounded-xl border bg-card p-3 sm:p-5">
-      <h2 className="text-lg font-semibold">4. Adresses de connexion</h2>
-      <div className="space-y-1"><label className="text-sm font-medium">URL de base AcreMap à saisir dans le CRM</label><div className="flex min-w-0 flex-col gap-2 sm:flex-row"><input readOnly value={ACREMAP_BASE_URL} className="min-w-0 w-full flex-1 rounded-lg border bg-muted px-3 py-2 text-xs" /><button onClick={() => void copy("base", ACREMAP_BASE_URL)} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">{copied === "base" ? "Copié" : "Copier"}</button></div></div>
-      <div className="space-y-1"><label className="text-sm font-medium">URL webhook CRM (variable CRM_WEBHOOK_URL côté Vercel AcreMap)</label><div className="flex min-w-0 flex-col gap-2 sm:flex-row"><input readOnly value={CRM_WEBHOOK_URL} className="min-w-0 w-full flex-1 rounded-lg border bg-muted px-3 py-2 text-xs" /><button onClick={() => void copy("url", CRM_WEBHOOK_URL)} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">{copied === "url" ? "Copié" : "Copier"}</button></div></div>
+      <h2 className="text-lg font-semibold">4. Connexions</h2>
+      <div className="space-y-1"><label className="text-sm font-medium">URL AcreMap</label><div className="flex min-w-0 flex-col gap-2 sm:flex-row"><input readOnly value={ACREMAP_BASE_URL} className="min-w-0 w-full flex-1 rounded-lg border bg-muted px-3 py-2 text-xs" /><button onClick={() => void copy("base", ACREMAP_BASE_URL)} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">{copied === "base" ? "Copié" : "Copier"}</button></div></div>
+      <div className="space-y-1"><label className="text-sm font-medium">Webhook CRM</label><div className="flex min-w-0 flex-col gap-2 sm:flex-row"><input readOnly value={CRM_WEBHOOK_URL} className="min-w-0 w-full flex-1 rounded-lg border bg-muted px-3 py-2 text-xs" /><button onClick={() => void copy("url", CRM_WEBHOOK_URL)} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">{copied === "url" ? "Copié" : "Copier"}</button></div></div>
     </section>
 
-    <section className="min-w-0 space-y-3 rounded-xl border bg-card p-3 sm:p-5">
-      <h2 className="text-lg font-semibold">5. Procédure de synchronisation</h2>
-      <ol className="list-decimal space-y-2 pl-5 text-sm">
-        <li>Configurez les variables serveur dans Vercel/AcreMap : <code>SUPABASE_URL</code>, <code>SUPABASE_PUBLISHABLE_KEY</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code>, <code>ACREMAP_CRM_API_KEY</code>, <code>CRM_WEBHOOK_URL</code> et <code>CRM_WEBHOOK_SECRET</code>.</li>
-        <li>Générez les secrets ci-dessus et copiez la clé API et le secret HMAC dans Vercel, puis dans CRM → Paramètres → AcreMap API. Les valeurs doivent correspondre exactement.</li>
-        <li>Redéployez AcreMap après la configuration des variables, puis cliquez sur « Synchroniser les propriétaires » dans les paramètres du CRM.</li>
-        <li>Dans AcreMap, créez/publiez un plan de morcellement puis vérifiez dans le CRM les lots, superficies et parts AgriCapital/propriétaire.</li>
-      </ol>
-    </section>
   </div>;
 }
