@@ -93,6 +93,68 @@ function sliceByArea(poly: AnyPoly, axis: Axis, targetM2: number): { cut: AnyPol
   return { cut: best, rest: differenceSafe(poly, best), area: bestArea };
 }
 
+/**
+ * Découpe adaptative : recherche l'arête dominante du polygone courant puis
+ * coupe perpendiculairement à cette arête dans le repère métrique. À chaque
+ * nouveau lot, l'orientation est recalculée sur le reliquat : les limites
+ * suivent donc la forme locale du terrain au lieu de répéter une grille XY.
+ */
+function sliceByAreaAdaptive(poly: AnyPoly, targetM2: number): { cut: AnyPoly | null; rest: AnyPoly | null; area: number } {
+  const rings = poly.geometry.type === "Polygon"
+    ? [poly.geometry.coordinates[0]]
+    : poly.geometry.coordinates.map((part) => part[0]);
+  let bestEdge: { dx: number; dy: number; length: number } | null = null;
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length - 1; i++) {
+      const a = ring[i], b = ring[i + 1];
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      const length = Math.hypot(dx, dy);
+      if (length > (bestEdge?.length ?? 0)) bestEdge = { dx, dy, length };
+    }
+  }
+  if (!bestEdge || bestEdge.length < 0.01) return { cut: null, rest: poly, area: 0 };
+
+  // Direction normale au côté dominant. Le signe est stabilisé pour rendre
+  // le résultat reproductible d'une exécution à l'autre.
+  let nx = -bestEdge.dy / bestEdge.length;
+  let ny = bestEdge.dx / bestEdge.length;
+  if (nx < 0 || (Math.abs(nx) < 1e-8 && ny < 0)) { nx = -nx; ny = -ny; }
+
+  const coords = rings.flat();
+  const projections = coords.map(([x, y]) => x * nx + y * ny);
+  let lo = Math.min(...projections) - 1;
+  let hi = Math.max(...projections) + 1;
+  const span = Math.max(hi - lo, 1);
+  const [minX, minY, maxX, maxY] = turf.bbox(poly);
+  const reach = Math.hypot(maxX - minX, maxY - minY) * 4 + 10;
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const tx = -ny, ty = nx;
+  let best: AnyPoly | null = null;
+  let bestArea = 0;
+  for (let i = 0; i < 64; i++) {
+    const mid = (lo + hi) / 2;
+    const px = nx * mid, py = ny * mid;
+    const a: [number, number] = [px + tx * reach, py + ty * reach];
+    const b: [number, number] = [px - tx * reach, py - ty * reach];
+    // Grande demi-bande du côté inférieur de la coupe.
+    const p1: [number, number] = [a[0] - nx * reach * 2, a[1] - ny * reach * 2];
+    const p2: [number, number] = [b[0] - nx * reach * 2, b[1] - ny * reach * 2];
+    const clip = turf.polygon([[a, b, p2, p1, a]]) as Feature<Polygon>;
+    const candidate = intersectSafe(poly, clip);
+    const area = areaOf(candidate);
+    best = candidate;
+    bestArea = area;
+    if (Math.abs(area - targetM2) <= Math.max(0.5, targetM2 * 1e-6)) break;
+    if (area > targetM2) hi = mid; else lo = mid;
+  }
+  if (!best || bestArea <= 0) return { cut: null, rest: poly, area: 0 };
+  const pieces = splitPieces(best).sort((a, b) => planarAreaM2(b) - planarAreaM2(a));
+  if (!pieces[0]) return { cut: null, rest: poly, area: 0 };
+  const selected = featureOf(pieces[0]);
+  const area = planarAreaM2(pieces[0]);
+  return { cut: selected, rest: differenceSafe(poly, selected), area };
+}
+
 /** Découpe un site à proximité d'une voie, sans absorber les deux côtés du corridor. */
 function sliceNearCoordinate(poly: AnyPoly, axis: Axis, targetM2: number, coordinate: number): { cut: AnyPoly | null; rest: AnyPoly | null; area: number } {
   const bbox = turf.bbox(poly);
@@ -295,7 +357,7 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
       guard++;
       const remArea = areaOf(rem);
       if (remArea < cibleM2 + 1) break;
-      const { cut, rest, area } = sliceByArea(rem, axis, cibleM2);
+      const { cut, rest, area } = sliceByAreaAdaptive(rem, cibleM2);
       const pieces = splitPieces(cut).sort((a, b) => planarAreaM2(b) - planarAreaM2(a));
       if (!pieces[0]) break;
       const g = pieces[0];
