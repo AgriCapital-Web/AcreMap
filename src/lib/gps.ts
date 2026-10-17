@@ -20,8 +20,8 @@ export interface GpsConfig {
 
 export const DEFAULT_GPS_CONFIG: GpsConfig = {
   maxAcceptableAccuracy: 15,
-  staticSamples: 30,
-  staticTimeoutMs: 30_000,
+  staticSamples: 8,
+  staticTimeoutMs: 8_000,
   autoMarkEveryMeters: 100,
   kalmanProcessNoise: 0.6,
 };
@@ -162,7 +162,7 @@ export function startWatch(listener: Listener, cfg: GpsConfig = DEFAULT_GPS_CONF
       listener(raw, filtered);
     },
     (err) => { console.warn("GPS error",err); onError?.(err.code===1?"Autorisez la localisation GPS pour poursuivre le levé.":err.code===2?"Position GPS indisponible. Vérifiez le GPS du téléphone et dégagez le ciel.":"Le GPS tarde à répondre. Gardez l'écran ouvert et réessayez."); },
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 30_000 }
+    { enableHighAccuracy: true, maximumAge: 1_500, timeout: 12_000 }
   );
   return { stop: () => navigator.geolocation.clearWatch(id) };
 }
@@ -214,7 +214,7 @@ export function captureStaticPoint(
         navigator.geolocation.clearWatch(id);
         reject(err);
       },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 30_000 }
+      { enableHighAccuracy: true, maximumAge: 1_500, timeout: 12_000 }
     );
   });
 }
@@ -362,7 +362,7 @@ export function runCalibration(
             : "Impossible d'obtenir la position. Vérifiez que le GPS est activé.",
         ));
       },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 30_000 },
+      { enableHighAccuracy: true, maximumAge: 1_500, timeout: 12_000 },
     );
     timer = setTimeout(finish, durationMs);
   });
