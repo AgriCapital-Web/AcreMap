@@ -157,7 +157,13 @@ $acremap_migration$;
 
 export const runAcreMapMigrations = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((input: { accessToken?: string }) => {
+    if (input.accessToken !== undefined && (typeof input.accessToken !== "string" || input.accessToken.length > 500)) {
+      throw new Error("Jeton Supabase invalide.");
+    }
+    return input;
+  })
+  .handler(async ({ data, context }) => {
     const { data: roleRow, error: roleError } = await context.supabase
       .from("user_roles")
       .select("id")
@@ -166,12 +172,12 @@ export const runAcreMapMigrations = createServerFn({ method: "POST" })
       .maybeSingle();
     if (roleError || !roleRow) throw new Error("Migration réservée à l'administrateur principal.");
 
-    const token = process.env.SUPABASE_ACCESS_TOKEN?.trim();
+    const token = data.accessToken?.trim() || process.env.SUPABASE_ACCESS_TOKEN?.trim();
     const configuredUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? "";
     let inferredRef = "";
     try { inferredRef = new URL(configuredUrl).hostname.split(".")[0] ?? ""; } catch { /* report invalid ref below */ }
     const projectRef = process.env.SUPABASE_PROJECT_REF?.trim() || inferredRef;
-    if (!token) throw new Error("SUPABASE_ACCESS_TOKEN manquant dans Vercel. Créez un jeton Supabase Management API autorisé à modifier la base AcreMap, ajoutez-le comme secret serveur puis redéployez.");
+    if (!token) throw new Error("Jeton Supabase Management API requis. Collez un jeton autorisé à modifier la base AcreMap dans le champ sécurisé de cette page, ou configurez SUPABASE_ACCESS_TOKEN côté serveur Vercel.");
     if (!/^[a-z0-9]{15,30}$/.test(projectRef)) throw new Error("SUPABASE_PROJECT_REF invalide.");
 
     const response = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
