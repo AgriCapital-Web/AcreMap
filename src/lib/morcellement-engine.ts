@@ -103,56 +103,84 @@ function sliceByAreaAdaptive(poly: AnyPoly, targetM2: number): { cut: AnyPoly | 
   const rings = poly.geometry.type === "Polygon"
     ? [poly.geometry.coordinates[0]]
     : poly.geometry.coordinates.map((part) => part[0]);
-  let bestEdge: { dx: number; dy: number; length: number } | null = null;
+  const vertices = rings.flat();
+  if (vertices.length < 4) return { cut: null, rest: poly, area: 0 };
+
+  // Tester plusieurs orientations réellement présentes dans la géométrie, ainsi
+  // que quelques angles de secours. Aucun axe n'est privilégié pour tous les lots.
+  const angles: number[] = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
   for (const ring of rings) {
     for (let i = 0; i < ring.length - 1; i++) {
       const a = ring[i], b = ring[i + 1];
       const dx = b[0] - a[0], dy = b[1] - a[1];
-      const length = Math.hypot(dx, dy);
-      if (length > (bestEdge?.length ?? 0)) bestEdge = { dx, dy, length };
+      if (Math.hypot(dx, dy) < 0.5) continue;
+      let angle = Math.atan2(dy, dx) + Math.PI / 2;
+      while (angle < 0) angle += Math.PI;
+      while (angle >= Math.PI) angle -= Math.PI;
+      if (!angles.some((existing) => {
+        const delta = Math.abs(existing - angle);
+        return Math.min(delta, Math.PI - delta) < Math.PI / 36;
+      })) angles.push(angle);
     }
   }
-  if (!bestEdge || bestEdge.length < 0.01) return { cut: null, rest: poly, area: 0 };
 
-  // Direction normale au côté dominant. Le signe est stabilisé pour rendre
-  // le résultat reproductible d'une exécution à l'autre.
-  let nx = -bestEdge.dy / bestEdge.length;
-  let ny = bestEdge.dx / bestEdge.length;
-  if (nx < 0 || (Math.abs(nx) < 1e-8 && ny < 0)) { nx = -nx; ny = -ny; }
-
-  const coords = rings.flat();
-  const projections = coords.map(([x, y]) => x * nx + y * ny);
-  let lo = Math.min(...projections) - 1;
-  let hi = Math.max(...projections) + 1;
-  const span = Math.max(hi - lo, 1);
   const [minX, minY, maxX, maxY] = turf.bbox(poly);
-  const reach = Math.hypot(maxX - minX, maxY - minY) * 4 + 10;
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-  const tx = -ny, ty = nx;
-  let best: AnyPoly | null = null;
-  let bestArea = 0;
-  for (let i = 0; i < 64; i++) {
-    const mid = (lo + hi) / 2;
-    const px = nx * mid, py = ny * mid;
-    const a: [number, number] = [px + tx * reach, py + ty * reach];
-    const b: [number, number] = [px - tx * reach, py - ty * reach];
-    // Grande demi-bande du côté inférieur de la coupe.
-    const p1: [number, number] = [a[0] - nx * reach * 2, a[1] - ny * reach * 2];
-    const p2: [number, number] = [b[0] - nx * reach * 2, b[1] - ny * reach * 2];
-    const clip = turf.polygon([[a, b, p2, p1, a]]) as Feature<Polygon>;
-    const candidate = intersectSafe(poly, clip);
-    const area = areaOf(candidate);
-    best = candidate;
-    bestArea = area;
-    if (Math.abs(area - targetM2) <= Math.max(0.5, targetM2 * 1e-6)) break;
-    if (area > targetM2) hi = mid; else lo = mid;
+  const reach = Math.hypot(maxX - minX, maxY - minY) * 6 + 20;
+  let winner: { cut: AnyPoly; rest: AnyPoly; area: number; score: number } | null = null;
+
+  for (const angle of angles) {
+    const nx = Math.cos(angle), ny = Math.sin(angle);
+    const projections = vertices.map(([x, y]) => x * nx + y * ny);
+    let lo = Math.min(...projections) - 0.01;
+    let hi = Math.max(...projections) + 0.01;
+    let bestCut: AnyPoly | null = null;
+    let bestArea = 0;
+    let bestThreshold = (lo + hi) / 2;
+
+    // Bisection on this orientation, measuring the largest connected piece,
+    // not the sum of disconnected slivers on opposite sides of a concavity.
+    for (let i = 0; i < 56; i++) {
+      const mid = (lo + hi) / 2;
+      const tx = -ny, ty = nx;
+      const a: [number, number] = [nx * mid + tx * reach, ny * mid + ty * reach];
+      const b: [number, number] = [nx * mid - tx * reach, ny * mid - ty * reach];
+      const p1: [number, number] = [a[0] - nx * reach * 3, a[1] - ny * reach * 3];
+      const p2: [number, number] = [b[0] - nx * reach * 3, b[1] - ny * reach * 3];
+      const clip = turf.polygon([[a, b, p2, p1, a]]) as Feature<Polygon>;
+      const candidate = intersectSafe(poly, clip);
+      const pieces = splitPieces(candidate).sort((p, q) => planarAreaM2(q) - planarAreaM2(p));
+      const largest = pieces[0];
+      const area = largest ? planarAreaM2(largest) : 0;
+      if (largest && Math.abs(area - targetM2) < Math.abs(bestArea - targetM2)) {
+        bestCut = featureOf(largest);
+        bestArea = area;
+        bestThreshold = mid;
+      }
+      if (area > targetM2) hi = mid; else lo = mid;
+      if (Math.abs(area - targetM2) <= Math.max(0.5, targetM2 * 1e-6)) break;
+    }
+
+    if (!bestCut || bestArea <= 0) continue;
+    let perimeterLength = 0;
+    const cutRing = (bestCut.geometry as Polygon).coordinates[0];
+    for (let i = 0; i < cutRing.length - 1; i++) {
+      perimeterLength += Math.hypot(cutRing[i + 1][0] - cutRing[i][0], cutRing[i + 1][1] - cutRing[i][1]);
+    }
+    // Prefer area accuracy first, then compact and practical shapes. This is a
+    // heuristic, not a cadastral guarantee; the output is still checked below.
+    const areaError = Math.abs(bestArea - targetM2) / Math.max(1, targetM2);
+    const compactness = (perimeterLength * perimeterLength) / Math.max(1, 4 * Math.PI * bestArea);
+    const score = areaError * 1000 + Math.min(10, Math.max(0, compactness - 1)) * 0.18;
+    if (!winner || score < winner.score) {
+      const rest = differenceSafe(poly, bestCut);
+      if (!rest) continue;
+      winner = { cut: bestCut, rest, area: bestArea, score };
+    }
+    void bestThreshold;
   }
-  if (!best || bestArea <= 0) return { cut: null, rest: poly, area: 0 };
-  const pieces = splitPieces(best).sort((a, b) => planarAreaM2(b) - planarAreaM2(a));
-  if (!pieces[0]) return { cut: null, rest: poly, area: 0 };
-  const selected = featureOf(pieces[0]);
-  const area = planarAreaM2(pieces[0]);
-  return { cut: selected, rest: differenceSafe(poly, selected), area };
+
+  if (!winner) return { cut: null, rest: poly, area: 0 };
+  return { cut: winner.cut, rest: winner.rest, area: winner.area };
 }
 
 /** Découpe un site à proximité d'une voie, sans absorber les deux côtés du corridor. */
