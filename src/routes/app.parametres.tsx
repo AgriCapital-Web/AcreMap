@@ -14,6 +14,9 @@ const CRM_WEBHOOK_URL = "https://rfzfsmpsuempafhkqhra.supabase.co/functions/v1/a
 const ACREMAP_BASE_URL = "https://acremap.agricapital.ci";
 const VARS = [
   ["SUPABASE_URL", "URL du projet Supabase AcreMap"],
+  ["SUPABASE_PUBLISHABLE_KEY", "Clé publique Supabase pour le runtime serveur"],
+  ["VITE_SUPABASE_URL", "URL publique Supabase utilisée par le navigateur"],
+  ["VITE_SUPABASE_PUBLISHABLE_KEY", "Clé publique Supabase utilisée par le navigateur"],
   ["SUPABASE_SERVICE_ROLE_KEY", "Clé service_role Supabase AcreMap (secret serveur)"],
   ["ACREMAP_CRM_API_KEY", "Clé API Bearer AcreMap"],
   ["CRM_WEBHOOK_URL", "URL du webhook entrant CRM"],
@@ -71,7 +74,7 @@ function IntegrationSettingsPage() {
         <h2 className="text-lg font-semibold">État des variables serveur</h2>
         <button onClick={() => void refresh()} className="rounded-lg border px-3 py-2 text-sm">Actualiser</button>
       </div>
-      <p className="text-sm text-muted-foreground">Ces contrôles ne révèlent jamais les valeurs secrètes. Configurez les variables dans Vercel → projet <b>acremap</b> → Settings → Environment Variables, puis redéployez.</p>
+      <p className="text-sm text-muted-foreground">Ces contrôles ne révèlent jamais les valeurs secrètes. Configurez les variables dans Vercel → projet <b>acremap</b> → Settings → Environment Variables, puis redéployez. Les variables VITE_* sont publiques ; la clé service_role ne doit jamais être préfixée par VITE_.</p>
       <div className="space-y-2">
         {VARS.map(([key, label]) => <div key={key} className="flex items-start justify-between gap-3 rounded-lg border p-3">
           <div className="min-w-0"><div className="font-mono text-xs sm:text-sm break-all">{key}</div><div className="text-xs text-muted-foreground">{label}</div></div>
