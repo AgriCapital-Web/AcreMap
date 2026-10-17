@@ -18,7 +18,7 @@ Copiez `.env.example` vers `.env.local` et renseignez le projet Supabase réelle
 - `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` : assistant IA facultatif via une API compatible OpenAI.
 - `GOOGLE_MAPS_API_KEY` : intégration Google Maps facultative.
 
-Les valeurs de `.env.example` sont des espaces réservés, pas des clés fonctionnelles. AcreMap ne dépend pas de Lovable.
+Les valeurs de `.env.example` sont des espaces réservés, pas des clés fonctionnelles.
 
 ## Données hors ligne
 IndexedDB/Dexie sert de cache local et la file d'attente synchronise les changements avec Supabase à la reconnexion. Les lectures cloud sont paginées pour éviter de tronquer les tables volumineuses.
@@ -26,8 +26,10 @@ IndexedDB/Dexie sert de cache local et la file d'attente synchronise les changem
 ## Déploiement
 Dépôt officiel : `AgriCapital-Web/AcreMap`, branche `Principal`. Vérifiez que Vercel est relié à ce dépôt et que les variables d'environnement sont configurées.
 
+Les instructions SQL complètes pour l’intégration CRM sont dans [`plan.md`](./plan.md). Exécutez le SQL AcreMap dans le projet Supabase utilisé par AcreMap, et non dans celui du CRM.
+
 ## Morcellement et exports
-Le moteur valide le périmètre GPS, conserve les reliquats, mesure les superficies et contrôle le bilan surfacique global. Les exports PDF, CSV, DXF, GeoJSON, KML et Shapefile sont générés côté navigateur.
+Le moteur de morcellement est exécuté localement dans l’application à partir des relevés GPS et de la bibliothèque géométrique embarquée : aucune IA externe, aucun crédit IA et aucun service distant ne calcule les lots. Il valide le périmètre, conserve les reliquats, mesure les superficies et contrôle le bilan surfacique global. Les exports PDF, CSV, DXF, GeoJSON, KML et Shapefile sont générés côté navigateur.
 
 
 ## API d'intégration CRM
