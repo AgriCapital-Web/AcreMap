@@ -286,10 +286,10 @@ function MorcellementPage() {
     }
   };
 
-  const exportLots = useCallback((selection: "all" | "entreprise" | "client" = "all", focusCode?: string): Lot[] => {
+  const exportLots = useCallback((selection: "all" | "entreprise" | "client" = "all", _focusCode?: string): Lot[] => {
     if (!plan) return [];
     return plan.lots.filter((item) => selection !== "entreprise" || item.kind !== "lot" || item.part === "ac")
-      .filter((item) => selection !== "client" || item.code === focusCode).filter((item) => (item.geo?.length ?? 0) >= 3)
+      .filter((item) => (item.geo?.length ?? 0) >= 3)
       .map((item) => ({
         id: `${planId ?? "preview"}-${item.code}`, parcelleId: parcelle?.id ?? "", measurementId: releve?.id ?? "",
         code: item.code, polygon: (item.geo ?? []).map((p) => ({ lat: p.lat, lng: p.lng })), areaM2: item.reelM2,

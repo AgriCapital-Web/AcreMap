@@ -40,34 +40,34 @@ export function PlanPreview({
       ))}
 
       {plan.lots.map((l) => {
-        const cx = l.poly.reduce((a, p) => a + p[0], 0) / l.poly.length;
-        const cy = l.poly.reduce((a, p) => a + p[1], 0) / l.poly.length;
+        const xs = l.poly.map((p) => p[0]);
+        const ys = l.poly.map((p) => p[1]);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+        const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+        const width = Math.max(...xs) - Math.min(...xs);
+        const height = Math.max(...ys) - Math.min(...ys);
         const faded = dim(l);
+        const isSelected = selected === l.code;
+        const label = l.kind === "lot" ? l.code : (l.label ?? l.code);
+        // Keep the map readable on phones: one short label per polygon.
+        // Areas and assignee details remain in the table/cards below the map.
+        const canFitLabel = width >= 2.4 && height >= 2.4;
         return (
-          <g key={l.code} opacity={faded ? 0.22 : 1}
+          <g key={l.code} opacity={faded ? 0.2 : 1}
             onClick={() => l.kind === "lot" && onSelect?.(l.code)}
             className={l.kind === "lot" ? "cursor-pointer" : ""}>
             <polygon points={l.poly.map((p) => p.join(",")).join(" ")}
               fill={fill(l)}
-              stroke={selected === l.code ? "var(--primary)" : tint("--foreground", 60)}
-              strokeWidth={selected === l.code ? 0.8 : 0.25} />
-            {l.kind === "lot" ? (
-              <>
-                <text x={cx} y={cy - 0.4} textAnchor="middle" fontSize="2.1" fontWeight="700"
-                  fill="var(--foreground)">{l.code}</text>
-                <text x={cx} y={cy + 2.2} textAnchor="middle" fontSize="1.5"
-                  fill="var(--muted-foreground)">
-                  {l.reelM2.toLocaleString("fr-FR")} m²
-                </text>
-                {assigned?.[l.code] && (
-                  <text x={cx} y={cy + 4.4} textAnchor="middle" fontSize="1.4" fill="var(--primary)">
-                    {assigned[l.code].nom}
-                  </text>
-                )}
-              </>
-            ) : (
-              <text x={cx} y={cy + 1} textAnchor="middle" fontSize="1.7" fontWeight="700"
-                fill="var(--foreground)">{l.label}</text>
+              stroke={isSelected ? "var(--primary)" : tint("--foreground", 60)}
+              strokeWidth={isSelected ? 0.9 : 0.25} />
+            {canFitLabel && (
+              <text x={cx} y={cy + 0.7} textAnchor="middle"
+                fontSize={isSelected ? "2.4" : (width < 4 ? "1.5" : "1.9")}
+                fontWeight={isSelected ? "800" : "700"}
+                fill={isSelected ? "var(--primary)" : "var(--foreground)"}
+                paintOrder="stroke" stroke="var(--background)" strokeWidth="0.35">
+                {label}
+              </text>
             )}
           </g>
         );

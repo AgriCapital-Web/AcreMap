@@ -249,22 +249,29 @@ export function buildGeometrePdf(args: BuildArgs): Blob {
       doc.setLineDashPattern([0.8, 0.8], 0);
       drawPoly(doc, pts, "FD");
       doc.setLineDashPattern([], 0);
-      // Étiquettes de longueur (en mètres réels — distance UTM)
-      doc.setFontSize(4.8); doc.setFont("helvetica", "normal"); doc.setTextColor(60, 60, 60);
+      // Cotes uniquement sur les côtés qui restent lisibles à l'échelle papier.
+      doc.setFontSize(4.4); doc.setFont("helvetica", "normal"); doc.setTextColor(60, 60, 60);
       for (let i = 0; i < pts.length; i++) {
         const a = pts[i], b = pts[(i + 1) % pts.length];
         const au = ptsUtm[i], bu = ptsUtm[(i + 1) % pts.length];
         const lenM = Math.hypot(bu[0] - au[0], bu[1] - au[1]);
-        if (lenM < 3) continue;
+        const paperLength = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (lenM < 8 || paperLength < 12) continue;
         const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
-        doc.text(`${lenM.toFixed(2)} m`.replace(".", ","), mx, my, { align: "center", baseline: "middle" });
+        doc.text(`${lenM.toFixed(1)} m`.replace(".", ","), mx, my, { align: "center", baseline: "middle" });
       }
       const cx2 = pts.reduce((s, p) => s + p[0], 0) / pts.length;
       const cy2 = pts.reduce((s, p) => s + p[1], 0) / pts.length;
-      doc.setTextColor(40, 40, 40); doc.setFont("helvetica", "bold"); doc.setFontSize(8);
-      doc.text(l.code, cx2, cy2 - 0.5, { align: "center" });
-      doc.setFontSize(6); doc.setFont("helvetica", "normal"); doc.setTextColor(60, 60, 60);
-      doc.text(`${(l.areaM2 / 10000).toFixed(2)} ha`.replace(".", ","), cx2, cy2 + 2.2, { align: "center" });
+      const paperW = Math.max(...pts.map(p => p[0])) - Math.min(...pts.map(p => p[0]));
+      const paperH = Math.max(...pts.map(p => p[1])) - Math.min(...pts.map(p => p[1]));
+      doc.setTextColor(40, 40, 40); doc.setFont("helvetica", "bold");
+      doc.setFontSize(Math.min(7, Math.max(4.5, Math.min(paperW, paperH) * 0.55)));
+      doc.text(l.code, cx2, cy2 - 0.2, { align: "center" });
+      // Do not force the area label into narrow polygons; the table carries exact areas.
+      if (paperW >= 9 && paperH >= 6) {
+        doc.setFontSize(5); doc.setFont("helvetica", "normal"); doc.setTextColor(60, 60, 60);
+        doc.text(`${(l.areaM2 / 10000).toFixed(2)} ha`.replace(".", ","), cx2, cy2 + 2, { align: "center" });
+      }
     });
 
     // Piste d'accès centrale
@@ -315,7 +322,7 @@ export function buildGeometrePdf(args: BuildArgs): Blob {
 
   // TABLEAU DES LOTS
   if (lots.length > 0) {
-    sectionTitle(doc, rx, ry, colRightW, `TABLEAU DES LOTS — ${targetHa} HECTARE${targetHa > 1 ? "S" : ""} CHACUN`);
+    sectionTitle(doc, rx, ry, colRightW, "TABLEAU DES LOTS ET ESPACES");
     ry += 5;
     const headers = ["N° LOT", "RÉFÉRENCE OFFICIELLE", "SUPERFICIE"];
     const widths = [10, 56, 22];
