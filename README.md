@@ -4,7 +4,7 @@ Application AgriCapital de gestion cartographique, levés GPS, parcelles, morcel
 
 ## Développement
 - Node.js 24.x
-- Installer : `npm ci`
+- Installer : `npm install`
 - Développement : `npm run dev`
 - Vérification TypeScript : `npm run check`
 - Compilation : `npm run build`
