@@ -92,6 +92,7 @@ function MeasurePage() {
   const [satellite, setSatellite] = useState(true);
   const [offlineSchematic, setOfflineSchematic] = useState(() => typeof navigator !== "undefined" && !navigator.onLine);
   const [tilePrefetchMessage, setTilePrefetchMessage] = useState<string | null>(null);
+  const [locateRequest, setLocateRequest] = useState(0);
   const [unit, setUnit] = useState<"ha" | "m2" | "km2">("ha");
   const [current, setCurrent] = useState<GpsPoint | null>(null);
   const [filteredCur, setFilteredCur] = useState<GpsPoint | null>(null);
@@ -458,6 +459,7 @@ function MeasurePage() {
         <MapView
           satellite={satellite}
           schematic={offlineSchematic}
+          locateRequest={locateRequest}
           current={filteredCur}
           currentAccuracy={filteredCur?.accuracy}
           perimeter={points}
@@ -584,6 +586,15 @@ function MeasurePage() {
           title={offlineSchematic ? "Fond schématique actif — toucher pour afficher les cartes en cache" : satellite ? "Vue carte" : "Vue satellite"}
         >
           <Layers className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => setLocateRequest((v) => v + 1)}
+          disabled={!filteredCur}
+          className="p-2 rounded-full bg-card/95 backdrop-blur shadow-elevated disabled:opacity-40"
+          title={filteredCur ? "Me localiser sur la carte" : "Attendez le premier positionnement GPS"}
+          aria-label="Me localiser sur la carte"
+        >
+          <Crosshair className="w-4 h-4" />
         </button>
         <button
           onClick={() => setOptionsOpen(true)}

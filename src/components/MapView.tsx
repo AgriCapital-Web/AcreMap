@@ -17,11 +17,13 @@ interface Props {
   lots?: { code: string; polygon: MapPoint[] }[];
   className?: string;
   onMapClick?: (p: MapPoint) => void;
+  locateRequest?: number;
 }
 
 export function MapView(props: Props) {
   const elRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LMap | null>(null);
+  const lastLocateRequestRef = useRef<number | undefined>(undefined);
   const layersRef = useRef<{
     perimeter?: Polygon | Polyline;
     trace?: Polyline;
@@ -116,6 +118,15 @@ export function MapView(props: Props) {
     if (!props.onMapClick) return;
     map.on("click", (e: any) => props.onMapClick?.({ lat: e.latlng.lat, lng: e.latlng.lng }));
   }
+
+  // Bouton explicite « Me localiser » : recentre la carte sur la position GPS actuelle.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !props.current || props.locateRequest === undefined) return;
+    if (lastLocateRequestRef.current === props.locateRequest) return;
+    lastLocateRequestRef.current = props.locateRequest;
+    map.setView([props.current.lat, props.current.lng], Math.max(map.getZoom(), 18), { animate: true });
+  }, [props.current, props.locateRequest]);
 
   // sync data
   useEffect(() => { sync(); /* eslint-disable-next-line */ }, [

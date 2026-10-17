@@ -104,7 +104,7 @@ async function pushDelete(table:TableName,id:string):Promise<void>{const {error}
 async function fetchAllRows(table: TableName): Promise<any[]> {
   const all: any[] = [];
   for (let offset = 0; ; offset += 1000) {
-    const { data, error } = await withNetworkTimeout((supabase.from(table) as any).select("*").order("id", { ascending: true }).range(offset, offset + 999));
+    const { data, error } = await withNetworkTimeout<{ data: any[] | null; error: { message: string } | null }>((supabase.from(table) as any).select("*").order("id", { ascending: true }).range(offset, offset + 999));
     if (error) throw error;
     const page = (data ?? []) as any[];
     all.push(...page);

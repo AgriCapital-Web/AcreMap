@@ -1,8 +1,24 @@
 // AcreMap Service Worker — hors ligne complet (app shell + assets + tuiles) + notifications
-const CACHE="acremap-v7";const TILE_CACHE="acremap-tiles-v1";const SHELL=["/","/login","/app","/app/measure","/app/parcelles","/app/morcellement","/app/releves","/app/validation","/app/parametres","/manifest.webmanifest","/favicon.png","/icon-192.png","/icon-512.png"];
+const CACHE="acremap-v8";const TILE_CACHE="acremap-tiles-v1";const SHELL=["/","/login","/app","/app/measure","/app/parcelles","/app/parcelles/new","/app/morcellement","/app/hierarchie","/app/assistant","/app/releves","/app/validation","/app/users","/app/parametres","/app/import","/app/debug","/app/change-password","/app/traitement","/manifest.webmanifest","/favicon.png","/apple-touch-icon.png","/icon-192.png","/icon-512.png"];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil((async()=>{const c=await caches.open(CACHE);await Promise.allSettled(SHELL.map(async u=>{try{const r=await fetch(u,{cache:"reload"});if(r.ok&&r.status===200)await c.put(u,r);}catch{}}));})());
+  e.waitUntil((async()=>{
+    const c=await caches.open(CACHE);
+    // Cache every compiled client chunk (including pages never opened by this user).
+    // The build generates this manifest from the real Vite output; no hard-coded hashes.
+    try {
+      const mr=await fetch("/offline-assets.json",{cache:"reload"});
+      if(mr.ok){
+        const assets=await mr.json();
+        await Promise.allSettled((Array.isArray(assets)?assets:[]).map(async u=>{
+          try { const r=await fetch(u,{cache:"reload"}); if(r.ok&&r.status===200) await c.put(u,r); } catch {}
+        }));
+      }
+    } catch {}
+    await Promise.allSettled(SHELL.map(async u=>{
+      try { const r=await fetch(u,{cache:"reload"}); if(r.ok&&r.status===200) await c.put(u,r); } catch {}
+    }));
+  })());
   self.skipWaiting();
 });
 
