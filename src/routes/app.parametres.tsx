@@ -19,7 +19,8 @@ const VARS = [
   ["VITE_SUPABASE_URL", "URL Supabase utilisée par le navigateur"],
   ["VITE_SUPABASE_PUBLISHABLE_KEY", "Clé publique utilisée par le navigateur"],
   ["SUPABASE_SERVICE_ROLE_KEY", "Clé secrète serveur pour les opérations d’administration"],
-  ["SUPABASE_ACCESS_TOKEN", "Jeton limité au projet pour exécuter les migrations"],
+  ["SUPABASE_ACCESS_TOKEN", "Jeton Supabase Management API pour exécuter les migrations"],
+  ["SUPABASE_PROJECT_REF", "Référence du projet Supabase cible des migrations"],
   ["ACREMAP_CRM_API_KEY", "Clé Bearer utilisée par le CRM pour envoyer les propriétaires"],
   ["CRM_WEBHOOK_URL", "Adresse du webhook entrant dans le CRM"],
   ["CRM_WEBHOOK_SECRET", "Secret HMAC partagé avec le CRM"],
@@ -112,7 +113,7 @@ function IntegrationSettingsPage() {
         <ol className="mt-2 list-decimal space-y-1 pl-5">
           <li>Dans Supabase, créez un jeton d’accès à portée limitée au projet AcreMap.</li>
           <li>Accordez uniquement l’accès Database en écriture nécessaire à la migration.</li>
-          <li>Dans Vercel → projet <b>acremap</b> → Settings → Environment Variables, ajoutez <code>SUPABASE_ACCESS_TOKEN</code> et <code>SUPABASE_PROJECT_REF=ckkjqpsoavrikgiuuktf</code> pour Production.</li>
+          <li>Dans Vercel → projet <b>acremap</b> → Settings → Environment Variables, ajoutez <code>SUPABASE_ACCESS_TOKEN</code> et <code>SUPABASE_PROJECT_REF=ckkjqpsoavrikgiuuktf</code> pour Production, Preview et Development si vous souhaitez y lancer les migrations.</li>
           <li>Redéployez, revenez ici et cliquez sur « Exécuter la migration ».</li>
         </ol>
       </div>
