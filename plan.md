@@ -98,4 +98,25 @@ Une page réservée à l’administrateur est disponible à `/app/parametres` (m
 - `CRM_WEBHOOK_URL` : `https://rfzfsmpsuempafhkqhra.supabase.co/functions/v1/acremap-webhook`.
 - `SUPABASE_SERVICE_ROLE_KEY` : clé secrète du projet Supabase AcreMap, à configurer uniquement côté serveur Vercel. Ne jamais la publier ni la préfixer par `VITE_`.
 
-La connexion Supabase de l’environnement d’administration actuel ne donne pas accès au projet AcreMap `ckkjqpsoavrikgiuuktf`. La migration AcreMap est donc versionnée dans `supabase/migrations/20261017010000_acremap_crm_integration.sql`, mais doit encore être appliquée au projet AcreMap par un administrateur disposant des droits sur ce projet. La migration CRM est séparée et ne doit pas être rejouée si elle est déjà appliquée.
+La migration AcreMap complète est versionnée dans `supabase/migrations/20261017020000_acremap_complete_setup.sql`. Elle est conçue pour être relancée sans dupliquer les objets. La migration CRM reste séparée et ne doit pas être rejouée si elle est déjà appliquée.
+
+
+## 7. Bouton « Exécuter la migration » dans Paramètres
+
+La page `/app/parametres` comporte un bouton protégé par le rôle administrateur principal. Il exécute uniquement la migration versionnée intégrée au serveur, jamais du SQL libre fourni par le navigateur.
+
+Avant de cliquer :
+1. Créer un jeton Supabase à portée limitée au seul projet AcreMap, avec le droit d'écriture Database nécessaire.
+2. Dans Vercel → projet `acremap` → Settings → Environment Variables, définir `SUPABASE_ACCESS_TOKEN` avec ce jeton et `SUPABASE_PROJECT_REF=ckkjqpsoavrikgiuuktf`.
+3. Appliquer ces variables à Production et redéployer l'application.
+4. Ouvrir AcreMap avec le compte administrateur principal, aller dans Paramètres & intégrations et cliquer sur « Exécuter la migration ».
+
+Le bouton utilise l'endpoint Management API Supabase `POST /v1/projects/{ref}/database/query`. Cet endpoint est documenté comme expérimental ; si Supabase le refuse, le message d'erreur est affiché et le script versionné reste disponible pour une exécution via une voie d'administration autorisée. La clé `SUPABASE_ACCESS_TOKEN` est strictement côté serveur et ne doit jamais être préfixée par `VITE_`.
+
+La migration prépare :
+- la table `public.crm_landowners`, son index et sa politique de lecture authentifiée ;
+- la colonne `public.lots.assignee_owner_id`, son index et sa relation optionnelle vers le propriétaire CRM ;
+- le registre des migrations `public.acremap_schema_migrations` pour éviter les répétitions ;
+- le bucket privé `imports` et des politiques Storage limitant les fichiers au dossier correspondant à l'identifiant de l'utilisateur connecté.
+
+Cette migration ne crée pas les tables métier de base qui doivent déjà exister dans AcreMap (notamment `public.lots`) et ne modifie pas la base CRM. Elle s'arrête explicitement si le schéma AcreMap de base est absent. Les données et les buckets existants ne sont pas supprimés.
