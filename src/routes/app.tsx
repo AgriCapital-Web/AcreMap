@@ -15,7 +15,7 @@ const NAV: { to: string; label: string; short: string; icon: string; admin?: boo
   { to: "/app", label: "Tableau de bord", short: "Accueil", icon: "home" },
   { to: "/app/parcelles", label: "Parcelles & levés", short: "Parcelles", icon: "map" },
   
-  { to: "/app/traitement", label: "Traitement & morcellement", short: "Traiter", icon: "tree" },
+  { to: "/app/morcellement", label: "Morcellement intelligent", short: "Morcellement", icon: "tree" },
   { to: "/app/hierarchie", label: "Hiérarchie", short: "Hiérarchie", icon: "tree" },
   { to: "/app/assistant", label: "Assistant IA", short: "IA", icon: "sparkle" },
   { to: "/app/releves", label: "Relevés (historique)", short: "Relevés", icon: "check", admin: true },
@@ -31,6 +31,7 @@ function AppLayout() {
   const nav = useNavigate();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [notifPerm, setNotifPerm] = useState<string>("default");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -40,22 +41,10 @@ function AppLayout() {
     }
   }, [hydrated, user, nav, path]);
 
-  // Service Worker — désactivé dans les iframes / previews Lovable
+  // Enregistrement du service worker sur le domaine officiel uniquement.
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
-    let inIframe = false;
-    try { inIframe = window.self !== window.top; } catch { inIframe = true; }
-    const isPreview =
-      typeof window !== "undefined" &&
-      (window.location.hostname.includes("id-preview--") ||
-       window.location.hostname.includes("lovableproject.com") ||
-       window.location.hostname.includes("lovable.app"));
-    if (inIframe || isPreview) {
-      navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister()));
-      return;
-    }
     navigator.serviceWorker.register("/sw.js").then((reg) => {
-      // Recherche immédiate d'une nouvelle version publiée (évite une app figée sur l'ancien build)
       reg.update().catch(() => {});
       const iv = setInterval(() => reg.update().catch(() => {}), 60_000);
       let reloading = false;
@@ -87,12 +76,16 @@ function AppLayout() {
   const handleSignOut = async () => { await signOut(); nav({ to: "/login" }); };
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row bg-muted/30">
-      <aside className={`${isMeasureRoute ? "lg:hidden" : "hidden lg:flex"} w-64 flex-col bg-sidebar text-sidebar-foreground`}>
+    <div className="min-h-screen flex bg-muted/30">
+      {menuOpen && !isMeasureRoute && (
+        <button aria-label="Fermer le menu" className="fixed inset-0 z-40 bg-black/45 lg:hidden"
+          onClick={() => setMenuOpen(false)} />
+      )}
+      <aside className={`${isMeasureRoute ? "hidden" : menuOpen ? "fixed inset-y-0 left-0 z-50 flex w-72 shadow-2xl" : "hidden"} lg:static lg:z-auto lg:flex lg:w-64 lg:shadow-none flex-col bg-sidebar text-sidebar-foreground`}>
         <div className="p-5 border-b border-sidebar-border">
           <Logo className="h-9 w-9" showText />
         </div>
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto" onClick={() => setMenuOpen(false)}>
           {items.map((n) => {
             const active = path === n.to || (n.to !== "/app" && path.startsWith(n.to));
             return (
@@ -135,7 +128,12 @@ function AppLayout() {
         </div>
       </aside>
 
-      <header className={`${isMeasureRoute ? "hidden" : "lg:hidden flex"} items-center justify-between p-3 bg-card border-b`}>
+      <header className={`${isMeasureRoute ? "hidden" : "flex"} lg:hidden items-center justify-between p-3 bg-card border-b sticky top-0 z-30`}>
+        <button type="button" aria-label="Ouvrir le menu" aria-expanded={menuOpen}
+          onClick={() => setMenuOpen(true)} className="inline-flex items-center justify-center rounded-lg border p-2"
+          disabled={menuOpen}>
+          <Icon name="menu" />
+        </button>
         <Logo className="h-8 w-8" showText />
         <div className="flex items-center gap-2">
           {notifPerm !== "granted" && notifPerm !== "unsupported" && (
@@ -147,11 +145,12 @@ function AppLayout() {
         </div>
       </header>
 
-      <main className={`flex-1 min-w-0 ${isMeasureRoute ? "pb-0" : "pb-24 lg:pb-0"}`}>
+      <main className="flex-1 min-w-0 min-h-screen">
         <Outlet />
       </main>
 
-      <nav className={`${isMeasureRoute ? "hidden" : "lg:hidden flex"} fixed bottom-0 inset-x-0 bg-card border-t items-stretch z-30 safe-area-bottom overflow-x-auto no-scrollbar`}>
+      {/* La navigation mobile est le menu latéral gauche ; aucune barre fixe en bas. */}
+      {false && <nav className={`${isMeasureRoute ? "hidden" : "lg:hidden flex"} fixed bottom-0 inset-x-0 bg-card border-t items-stretch z-30 safe-area-bottom overflow-x-auto no-scrollbar`}>
         {items.map((n) => {
           const active = path === n.to || (n.to !== "/app" && path.startsWith(n.to));
           return (
@@ -169,7 +168,7 @@ function AppLayout() {
           <Icon name="crosshair" />
           <span className="leading-none">Nouveau</span>
         </Link>
-      </nav>
+      </nav>}
     </div>
   );
 }
@@ -178,6 +177,7 @@ function Icon({ name }: { name: string }) {
   const common = "w-5 h-5";
   const stroke = "currentColor";
   switch (name) {
+    case "menu": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
     case "home": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M3 12L12 4l9 8" /><path d="M5 10v10h14V10" /></svg>;
     case "crosshair": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 3v4M12 17v4M3 12h4M17 12h4" /><circle cx="12" cy="12" r="2" fill={stroke} /></svg>;
     case "map": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M9 4l-6 2v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14" /></svg>;
