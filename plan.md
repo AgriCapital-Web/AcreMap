@@ -7,7 +7,7 @@
 - Projet Supabase CRM : référence `rfzfsmpsuempafhkqhra` (base distincte).
 - Migration versionnée complète : `supabase/migrations/20261017030000_acremap_complete_setup.sql`.
 - Page d'administration : `/app/parametres` → **Exécuter la migration**.
-- Le bouton n'accepte aucun SQL envoyé par le navigateur : il lance une migration fixe, revue, versionnée et idempotente côté serveur.
+- Le bouton n'accepte aucun SQL envoyé par le navigateur : il lance une migration fixe, revue, versionnée et idempotente côté serveur. Le jeton Management API peut être configuré comme secret Vercel ou saisi temporairement dans le formulaire administrateur ; dans ce second cas il est transmis uniquement à la requête et n'est pas stocké.
 
 ## Ce que couvre la migration AcreMap
 
@@ -24,13 +24,10 @@ La migration **ne supprime pas** les tables, les lots, les fichiers ni les donn�
 
 Le bouton appelle l'endpoint Supabase Management API `POST /v1/projects/{ref}/database/query`, qui est documenté comme expérimental. Pour l'utiliser :
 
-1. Dans les paramètres de compte Supabase, créer un jeton à portée limitée au projet AcreMap, avec l'autorisation Database en écriture nécessaire à l'exécution SQL.
-2. Dans Vercel → projet `acremap` → Settings → Environment Variables, ajouter :
-   - `SUPABASE_ACCESS_TOKEN` : jeton limité au projet, type secret/encrypted, serveur uniquement ;
-   - `SUPABASE_PROJECT_REF` : `ckkjqpsoavrikgiuuktf`.
-3. Ajouter ces variables à l'environnement Production et redéployer le projet.
-4. Se connecter à AcreMap avec le compte administrateur principal, ouvrir **Paramètres & intégrations** puis cliquer sur **Exécuter la migration**.
-5. Vérifier le message de réussite ou l'erreur renvoyée par Supabase. Si l'API Management refuse la requête, utiliser le SQL versionné ci-dessous dans le SQL Editor du projet AcreMap, avec un compte autorisé.
+1. Dans Supabase, créer un jeton Management API avec les droits de base de données nécessaires sur le projet AcreMap.
+2. Se connecter à AcreMap comme administrateur principal et ouvrir **Paramètres & intégrations**.
+3. Coller le jeton temporaire dans le champ dédié, puis cliquer sur **Exécuter la migration**. Le champ est effacé après succès ; le jeton n'est pas conservé par l'application. En alternative, définir `SUPABASE_ACCESS_TOKEN` comme secret serveur dans Vercel pour ne pas avoir à le saisir à chaque exécution.
+4. Vérifier le message de réussite ou l'erreur renvoyée par Supabase. Si l'API Management refuse la requête, utiliser le SQL versionné ci-dessous dans le SQL Editor du projet AcreMap, avec un compte autorisé.
 
 **Ne jamais** placer `SUPABASE_ACCESS_TOKEN` ou `SUPABASE_SERVICE_ROLE_KEY` dans une variable `VITE_*`, dans Git, dans le navigateur ou dans un document public.
 
