@@ -15,7 +15,7 @@ import { syncEntity, outboxCount } from "@/lib/sync";
 import { keepScreenAwake } from "@/lib/offline";
 import { useAuth } from "@/lib/auth";
 import { formatArea, formatDistance } from "@/lib/format";
-import { feedbackError, feedbackMark, feedbackSuccess, unlockAudio, notify, requestNotificationPermission } from "@/lib/feedback";
+import { feedbackError, feedbackMark, feedbackSuccess, unlockAudio, notify } from "@/lib/feedback";
 import type { GpsPoint, Measurement, MeasurementPoint } from "@/lib/types";
 import {
   MapPin, Pause, Play, Undo2, Save, Send, Settings2, Layers, X,
@@ -86,7 +86,7 @@ function MeasurePage() {
 
   // `running` = GPS actif (interface ouverte, position affichée)
   // `started` = levée réellement démarrée (le tracé n'avance qu'à partir de là)
-  const [running, setRunning] = useState(false);
+  const [running, setRunning] = useState(true);
   const [started, setStarted] = useState(false);
   const [paused, setPaused] = useState(false);
   const [satellite, setSatellite] = useState(true);
@@ -133,6 +133,14 @@ function MeasurePage() {
   const cfgRef = useRef<GpsConfig>(DEFAULT_GPS_CONFIG);
   const wakeRef = useRef<{ release: () => void } | null>(null);
   useEffect(() => () => { wakeRef.current?.release(); }, []);
+  useEffect(() => {
+    if (!running) return;
+    let cancelled = false;
+    void keepScreenAwake().then((wake) => {
+      if (cancelled) wake.release(); else wakeRef.current = wake;
+    }).catch(() => {});
+    return () => { cancelled = true; wakeRef.current?.release(); wakeRef.current = null; };
+  }, [running]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { startedRef.current = started; }, [started]);
   useEffect(() => { cfgRef.current = gpsConfig; }, [gpsConfig]);
@@ -175,7 +183,7 @@ function MeasurePage() {
       // déplacement dépasse largement l'incertitude GPS — seuil issu de la
       // calibration réelle de l'appareil quand elle est disponible.
       const calibratedMin = calibration?.recommendedMinMoveM ?? 8;
-      const minMove = Math.max(2,Math.min(calibratedMin,8),Math.min(raw.accuracy*0.5,6),Math.min(filtered.accuracy,5));
+      const minMove = Math.max(10, calibratedMin, Math.min(raw.accuracy * 1.5, 20));
       if (haversine(stable, filtered) < minMove) {
         setDistanceFromLast(0);
         return;
@@ -219,20 +227,6 @@ function MeasurePage() {
     }
   }
 
-  /** Ouvre simplement l'interface de levée : GPS actif, mais AUCUN tracé. */
-  async function openSurvey() {
-    await unlockAudio();
-    await requestNotificationPermission();
-    stablePosRef.current = null;
-    lastAutoRef.current = null;
-    setTrace([]);
-    setPoints([]);
-    setStarted(false);
-    setFilteredCur(null);
-    setRunning(true);
-    // Garde l'écran allumé pendant le levé (continuité du tracé)
-    void keepScreenAwake().then((w) => { wakeRef.current = w; });
-  }
   function togglePause() {
     setPaused((p) => {
       const next = !p;
@@ -261,6 +255,11 @@ function MeasurePage() {
     // Marquage INSTANTANÉ — un clic = un point ajouté immédiatement.
     // Utilise la dernière position filtrée (Kalman) si dispo, sinon le brut.
     const src = filteredCur ?? current;
+    if (!started && (!current || current.lat === 0 || current.lng === 0 || current.accuracy > 5)) {
+      feedbackError();
+      setError("Attendez un positionnement GPS réel et stable (précision annoncée ≤ 5 m) avant de marquer le départ.");
+      return;
+    }
     if (!src) {
       feedbackError();
       setError("Position GPS non encore reçue. Patientez quelques secondes.");
@@ -457,6 +456,12 @@ function MeasurePage() {
           guideColor="orange"
         />
       </div>
+      {/* Recentrage discret intégré à la carte */}
+      <button type="button" onClick={() => setLocateRequest((v) => v + 1)} disabled={!filteredCur}
+        className="absolute right-3 bottom-[calc(env(safe-area-inset-bottom)+7.5rem)] z-[600] p-3 rounded-full bg-card/95 text-foreground shadow-elevated border disabled:opacity-40"
+        title={filteredCur ? "Recentrer sur ma position GPS" : "Recherche de la position GPS"} aria-label="Recentrer sur ma position GPS">
+        <Crosshair className="w-5 h-5" />
+      </button>
 
       {/* TOP BAR FLOTTANTE — compacte */}
       <div className="absolute top-2 left-2 right-2 z-[500] flex items-start gap-2 pointer-events-none">
@@ -577,15 +582,6 @@ function MeasurePage() {
           <Layers className="w-4 h-4" />
         </button>
         <button
-          onClick={() => setLocateRequest((v) => v + 1)}
-          disabled={!filteredCur}
-          className="p-2 rounded-full bg-card/95 backdrop-blur shadow-elevated disabled:opacity-40"
-          title={filteredCur ? "Me localiser sur la carte" : "Attendez le premier positionnement GPS"}
-          aria-label="Me localiser sur la carte"
-        >
-          <Crosshair className="w-4 h-4" />
-        </button>
-        <button
           onClick={() => setOptionsOpen(true)}
           className="p-2 rounded-full bg-card/95 backdrop-blur shadow-elevated"
           title="Options"
@@ -634,18 +630,21 @@ function MeasurePage() {
           </div>
         )}
         <div className="flex flex-wrap gap-1.5 items-stretch">
-          <button
-            onClick={markPoint}
-            disabled={!running || paused}
-            className={`flex-1 min-w-[9rem] h-14 rounded-2xl font-bold shadow-elevated disabled:opacity-40 flex flex-col items-center justify-center gap-0.5 ${
-              started ? "bg-accent text-accent-foreground" : "bg-success text-white"
-            }`}
-          >
-            <MapPin className="w-5 h-5" />
-            <span className="text-[11px] leading-none text-center px-1">
-              {started ? "MARQUER UN POINT" : "MARQUER LE DÉPART"}
-            </span>
-          </button>
+          {(started || (!!current && current.lat !== 0 && current.lng !== 0 && current.accuracy <= 5)) && (
+            <button onClick={markPoint}
+              disabled={!running || paused || (!started && (!current || current.lat === 0 || current.lng === 0 || current.accuracy > 5))}
+              className={`flex-1 min-w-[9rem] h-14 rounded-2xl font-bold shadow-elevated disabled:opacity-40 flex flex-col items-center justify-center gap-0.5 ${
+                started ? "bg-accent text-accent-foreground" : "bg-success text-white"
+              }`}>
+              <MapPin className="w-5 h-5" />
+              <span className="text-[11px] leading-none text-center px-1">{started ? "MARQUER UN POINT" : "MARQUER LE DÉPART"}</span>
+            </button>
+          )}
+          {!started && !(current && current.lat !== 0 && current.lng !== 0 && current.accuracy <= 5) && (
+            <div role="status" className="flex-1 min-w-[9rem] h-14 rounded-2xl bg-card/95 border shadow-elevated flex flex-col items-center justify-center text-xs font-semibold">
+              <Crosshair className="w-5 h-5 animate-pulse" /><span>Recherche GPS fiable…</span>
+            </div>
+          )}
           {running && started && (
             <button
               onClick={togglePause}
@@ -687,31 +686,6 @@ function MeasurePage() {
           </button>
         </div>
       </div>
-
-      {/* OVERLAY DÉMARRAGE */}
-      {!running && (
-        <div className="absolute inset-0 bg-background/85 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 z-[1000] overflow-y-auto">
-          <div className="bg-card rounded-2xl p-5 sm:p-6 w-full max-w-md text-center shadow-elevated">
-            <h2 className="text-xl font-bold">Prêt pour la levée GPS</h2>
-            <p className="text-sm text-muted-foreground mt-2">
-              Après installation et première connexion sur cet appareil, les écrans de la levée restent disponibles localement même après fermeture ou redémarrage. Sur le terrain, activez le GPS et attendez le premier positionnement : Internet n'est pas nécessaire. Le premier fix peut prendre plus de temps hors service.
-            </p>
-            <p className="text-xs text-muted-foreground mt-2">
-              Le fond cartographique doit être préparé avant le départ pour voir les images hors ligne. Sans carte préchargée, AcreMap affiche un fond schématique et conserve les points GPS.
-            </p>
-            <p className="text-xs text-muted-foreground mt-2">
-              Ce bouton ouvre l'interface sans enregistrer de tracé. Attendez la position GPS, puis appuyez sur « MARQUER LE DÉPART ».
-            </p>
-            <button
-              onClick={openSurvey}
-              className="mt-5 w-full h-14 bg-primary text-primary-foreground rounded-xl font-bold text-base shadow-elevated"
-            >
-              ▶ OUVRIR L'INTERFACE DE LEVÉE
-            </button>
-            <p className="text-[10px] text-muted-foreground mt-2">Active GPS, son et notifications</p>
-          </div>
-        </div>
-      )}
 
       {/* Marquage instantané — pas d'overlay de capture */}
 
