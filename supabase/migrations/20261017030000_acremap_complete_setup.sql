@@ -72,13 +72,20 @@ begin
   alter table public.morcellement_plans add column if not exists created_at timestamptz not null default now();
   alter table public.morcellement_plans add column if not exists updated_at timestamptz not null default now();
   alter table public.morcellement_plans enable row level security;
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'morcellement_plans'
-      and policyname = 'morcellement_plans_authenticated_all'
-  ) then
-    execute 'create policy morcellement_plans_authenticated_all on public.morcellement_plans for all to authenticated using (true) with check (true)';
-  end if;
+  drop policy if exists morcellement_plans_authenticated_all on public.morcellement_plans;
+  drop policy if exists morcellement_plans_read_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_insert_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_update_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_delete_scoped on public.morcellement_plans;
+  create policy morcellement_plans_read_scoped on public.morcellement_plans for select to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_insert_scoped on public.morcellement_plans for insert to authenticated
+    with check (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_update_scoped on public.morcellement_plans for update to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')))
+    with check (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_delete_scoped on public.morcellement_plans for delete to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
   grant select, insert, update, delete on public.morcellement_plans to authenticated;
   grant select, insert, update, delete on public.morcellement_plans to service_role;
 

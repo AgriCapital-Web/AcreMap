@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const MIGRATION_ID = "20261017030000_acremap_complete_setup";
+const HARDENING_MIGRATION_ID = "20261017040000_acremap_morcellement_rls_hardening";
 
 /**
  * Idempotent, versioned setup for the AcreMap database.
@@ -83,13 +84,20 @@ begin
   alter table public.morcellement_plans add column if not exists created_at timestamptz not null default now();
   alter table public.morcellement_plans add column if not exists updated_at timestamptz not null default now();
   alter table public.morcellement_plans enable row level security;
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'morcellement_plans'
-      and policyname = 'morcellement_plans_authenticated_all'
-  ) then
-    execute 'create policy morcellement_plans_authenticated_all on public.morcellement_plans for all to authenticated using (true) with check (true)';
-  end if;
+  drop policy if exists morcellement_plans_authenticated_all on public.morcellement_plans;
+  drop policy if exists morcellement_plans_read_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_insert_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_update_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_delete_scoped on public.morcellement_plans;
+  create policy morcellement_plans_read_scoped on public.morcellement_plans for select to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_insert_scoped on public.morcellement_plans for insert to authenticated
+    with check (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_update_scoped on public.morcellement_plans for update to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')))
+    with check (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_delete_scoped on public.morcellement_plans for delete to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
   grant select, insert, update, delete on public.morcellement_plans to authenticated;
   grant select, insert, update, delete on public.morcellement_plans to service_role;
 
@@ -155,6 +163,42 @@ end
 $acremap_migration$;
 `;
 
+const HARDENING_MIGRATION_SQL = String.raw`
+do $acremap_rls_hardening$
+declare
+  migration_id constant text := '20261017040000_acremap_morcellement_rls_hardening';
+begin
+  if to_regclass('public.morcellement_plans') is null then
+    raise exception 'Table public.morcellement_plans is missing; run the base AcreMap setup first.';
+  end if;
+  if to_regclass('public.user_roles') is null then
+    raise exception 'Table public.user_roles is missing; role-scoped policies cannot be installed.';
+  end if;
+  create table if not exists public.acremap_schema_migrations (
+    version text primary key, applied_at timestamptz not null default now(),
+    applied_by text not null default 'settings_button'
+  );
+  drop policy if exists morcellement_plans_authenticated_all on public.morcellement_plans;
+  drop policy if exists morcellement_plans_read_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_insert_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_update_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_delete_scoped on public.morcellement_plans;
+  create policy morcellement_plans_read_scoped on public.morcellement_plans for select to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_insert_scoped on public.morcellement_plans for insert to authenticated
+    with check (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_update_scoped on public.morcellement_plans for update to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')))
+    with check (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_delete_scoped on public.morcellement_plans for delete to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  insert into public.acremap_schema_migrations(version, applied_by)
+    values (migration_id, 'settings_button') on conflict (version) do nothing;
+end
+$acremap_rls_hardening$;
+`;
+
+
 export const runAcreMapMigrations = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: { accessToken?: string }) => {
@@ -180,28 +224,27 @@ export const runAcreMapMigrations = createServerFn({ method: "POST" })
     if (!token) throw new Error("Jeton Supabase Management API requis. Collez un jeton autorisé à modifier la base AcreMap dans le champ sécurisé de cette page, ou configurez SUPABASE_ACCESS_TOKEN côté serveur Vercel.");
     if (!/^[a-z0-9]{15,30}$/.test(projectRef)) throw new Error("SUPABASE_PROJECT_REF invalide.");
 
-    const response = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ query: MIGRATION_SQL }),
-      signal: AbortSignal.timeout(45_000),
-    });
-
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 1200);
-      if (response.status === 401 || response.status === 403) {
-        throw new Error("Supabase a refusé le jeton de migration. Vérifiez son périmètre projet et les droits Database en écriture.");
+    const migrations = [
+      { id: MIGRATION_ID, sql: MIGRATION_SQL },
+      { id: HARDENING_MIGRATION_ID, sql: HARDENING_MIGRATION_SQL },
+    ] as const;
+    for (const migration of migrations) {
+      const response = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ query: migration.sql }),
+        signal: AbortSignal.timeout(45_000),
+      });
+      if (!response.ok) {
+        const detail = (await response.text()).slice(0, 1200);
+        if (response.status === 401 || response.status === 403) throw new Error("Supabase a refusé le jeton de migration. Vérifiez son périmètre projet et les droits Database en écriture.");
+        throw new Error(`Migration ${migration.id} refusée par Supabase (HTTP ${response.status}). ${detail}`);
       }
-      throw new Error(`Migration refusée par Supabase (HTTP ${response.status}). ${detail}`);
     }
 
     return {
       success: true,
-      migration: MIGRATION_ID,
-      message: "Migration exécutée. Les tables, colonnes, relation, règles RLS et bucket imports ont été vérifiés/créés de façon idempotente.",
+      migrations: [MIGRATION_ID, HARDENING_MIGRATION_ID],
+      message: "Migrations exécutées : schéma AcreMap, bucket privé imports et politiques RLS limitées au créateur du plan et aux administrateurs globaux.",
     };
   });

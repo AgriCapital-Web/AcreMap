@@ -5,7 +5,8 @@
 - Dépôt officiel : https://github.com/AgriCapital-Web/AcreMap — branche `Principal`.
 - Projet Supabase AcreMap : référence `ckkjqpsoavrikgiuuktf`.
 - Projet Supabase CRM : référence `rfzfsmpsuempafhkqhra` (base distincte).
-- Migration versionnée complète : `supabase/migrations/20261017030000_acremap_complete_setup.sql`.
+- Migration de base : `supabase/migrations/20261017030000_acremap_complete_setup.sql`.
+- Durcissement RLS : `supabase/migrations/20261017040000_acremap_morcellement_rls_hardening.sql`.
 - Page d'administration : `/app/parametres` → **Exécuter la migration**.
 - Le bouton n'accepte aucun SQL envoyé par le navigateur : il lance une migration fixe, revue, versionnée et idempotente côté serveur. Le jeton Management API peut être configuré comme secret Vercel ou saisi temporairement dans le formulaire administrateur ; dans ce second cas il est transmis uniquement à la requête et n'est pas stocké.
 
@@ -17,6 +18,7 @@
 4. Colonnes et index de lots pour le plan, le type de lot, la partie, la superficie cible, l'assignation et le propriétaire CRM.
 5. Relation optionnelle `lots.assignee_owner_id → crm_landowners.id`, créée sans valider rétroactivement d'éventuelles anciennes lignes.
 6. Bucket Storage privé `imports` et politiques permettant à chaque utilisateur authentifié d'accéder uniquement aux fichiers dans son propre dossier.
+7. Politiques RLS des plans : un utilisateur peut lire/modifier/supprimer ses propres plans ; les rôles globaux `admin`, `pdg` et `dg` conservent l'accès global.
 
 La migration **ne supprime pas** les tables, les lots, les fichiers ni les données existantes. Elle s'arrête explicitement si la table de base `public.lots` est absente : le schéma métier initial doit être installé avant cette intégration. Les objets déjà présents ne sont pas recréés en double.
 
@@ -62,7 +64,7 @@ La clé API et le secret HMAC doivent correspondre exactement dans les deux appl
 
 ## Migration SQL versionnée complète
 
-Le script ci-dessous est la copie du fichier `supabase/migrations/20261017030000_acremap_complete_setup.sql`. Le bouton d'administration exécute la même logique côté serveur. L'exécution est idempotente et inscrite dans le registre des migrations.
+Le script ci-dessous est la copie du fichier `supabase/migrations/20261017030000_acremap_complete_setup.sql`. Le bouton exécute ensuite le durcissement RLS versionné `20261017040000_acremap_morcellement_rls_hardening.sql`, même si la migration de base a déjà été enregistrée. Les deux opérations sont idempotentes et inscrites dans le registre.
 
 ```sql
 do $acremap_migration$
@@ -139,13 +141,20 @@ begin
   alter table public.morcellement_plans add column if not exists created_at timestamptz not null default now();
   alter table public.morcellement_plans add column if not exists updated_at timestamptz not null default now();
   alter table public.morcellement_plans enable row level security;
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'morcellement_plans'
-      and policyname = 'morcellement_plans_authenticated_all'
-  ) then
-    execute 'create policy morcellement_plans_authenticated_all on public.morcellement_plans for all to authenticated using (true) with check (true)';
-  end if;
+  drop policy if exists morcellement_plans_authenticated_all on public.morcellement_plans;
+  drop policy if exists morcellement_plans_read_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_insert_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_update_scoped on public.morcellement_plans;
+  drop policy if exists morcellement_plans_delete_scoped on public.morcellement_plans;
+  create policy morcellement_plans_read_scoped on public.morcellement_plans for select to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_insert_scoped on public.morcellement_plans for insert to authenticated
+    with check (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_update_scoped on public.morcellement_plans for update to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')))
+    with check (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
+  create policy morcellement_plans_delete_scoped on public.morcellement_plans for delete to authenticated
+    using (created_by = auth.uid() or exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and lower(ur.role) in ('admin','pdg','dg')));
   grant select, insert, update, delete on public.morcellement_plans to authenticated;
   grant select, insert, update, delete on public.morcellement_plans to service_role;
 
@@ -224,3 +233,8 @@ Après migration et configuration :
 - La page Utilisateurs peut lire/créer des comptes uniquement lorsque `SUPABASE_SERVICE_ROLE_KEY` est configurée côté serveur.
 - La synchronisation des propriétaires CRM et la publication d'un plan sont testées dans les deux sens.
 - Les essais sont effectués sur mobile et ordinateur, avec contrôle du débordement horizontal, du tiroir de navigation et des formulaires.
+
+
+## Durcissement RLS des plans
+
+Le correctif `20261017040000_acremap_morcellement_rls_hardening` retire l'ancienne politique qui autorisait tout utilisateur authentifié à modifier tous les plans. Les plans sont désormais limités à leur créateur, avec accès global conservé pour les rôles `admin`, `pdg` et `dg`. Les données existantes ne sont pas supprimées. Les plans historiques sans créateur restent accessibles aux administrateurs globaux.
