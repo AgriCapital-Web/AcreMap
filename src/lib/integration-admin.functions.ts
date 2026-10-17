@@ -14,6 +14,9 @@ export const getIntegrationEnvironmentStatus = createServerFn({ method: "GET" })
 
     const checks = {
       SUPABASE_URL: Boolean(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL),
+      SUPABASE_PUBLISHABLE_KEY: Boolean(process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY),
+      VITE_SUPABASE_URL: Boolean(process.env.VITE_SUPABASE_URL),
+      VITE_SUPABASE_PUBLISHABLE_KEY: Boolean(process.env.VITE_SUPABASE_PUBLISHABLE_KEY),
       SUPABASE_SERVICE_ROLE_KEY: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
       ACREMAP_CRM_API_KEY: Boolean(process.env.ACREMAP_CRM_API_KEY),
       CRM_WEBHOOK_URL: Boolean(process.env.CRM_WEBHOOK_URL),
