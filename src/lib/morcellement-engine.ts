@@ -8,8 +8,8 @@
  * 0..100 pour l'aperçu vectoriel.
  */
 import * as turf from "@turf/turf";
+import proj4 from "proj4";
 import type { Feature, Polygon, MultiPolygon } from "geojson";
-import { polygonAreaM2 } from "./gps";
 import type { Axis, Pt } from "./partage";
 import {
   TOLERANCE_M2,
@@ -41,16 +41,29 @@ function extractPolys(f: AnyPoly | null): Pt[][] {
 function featureOf(pts: Pt[]): Feature<Polygon> {
   return turf.polygon([ringFromPts(pts)]) as Feature<Polygon>;
 }
+function ringAreaXY(ring: number[][]): number {
+  let sum = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    if (a && b) sum += a[0] * b[1] - b[0] * a[1];
+  }
+  return Math.abs(sum) / 2;
+}
+function planarAreaM2(points: Pt[]): number {
+  return points.length < 3 ? 0 : ringAreaXY(points.map((p) => [p.lng, p.lat]));
+}
 function areaOf(f: AnyPoly | null): number {
   if (!f) return 0;
-  try { return turf.area(f); } catch { return 0; }
+  const polys = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+  return polys.reduce((sum, rings) => sum + Math.max(0, ringAreaXY(rings[0] as number[][]) -
+    rings.slice(1).reduce((holes, ring) => holes + ringAreaXY(ring as number[][]), 0)), 0);
 }
 function intersectSafe(a: AnyPoly, b: AnyPoly): AnyPoly | null {
   try { return turf.intersect(turf.featureCollection([a, b])) as AnyPoly | null; } catch { return null; }
 }
 function differenceSafe(a: AnyPoly, b: AnyPoly): AnyPoly | null {
   try { return turf.difference(turf.featureCollection([a, b])) as AnyPoly | null; }
-  catch { return a; }
+  catch { throw new Error("Échec de soustraction géométrique : plan interrompu pour éviter les chevauchements. Vérifiez le périmètre GPS."); }
 }
 function boxAlong(bbox: number[], axis: Axis, from: number, to: number): Feature<Polygon> {
   const [minX, minY, maxX, maxY] = bbox;
@@ -80,15 +93,34 @@ function sliceByArea(poly: AnyPoly, axis: Axis, targetM2: number): { cut: AnyPol
   return { cut: best, rest: differenceSafe(poly, best), area: bestArea };
 }
 
+/** Découpe un site à proximité d'une voie, sans absorber les deux côtés du corridor. */
+function sliceNearCoordinate(poly: AnyPoly, axis: Axis, targetM2: number, coordinate: number): { cut: AnyPoly | null; rest: AnyPoly | null; area: number } {
+  const bbox = turf.bbox(poly);
+  const [minX, minY, maxX, maxY] = bbox;
+  const extent = axis === "horizontal" ? maxY - minY : maxX - minX;
+  let lo = 0, hi = Math.max(1, extent);
+  let best: AnyPoly | null = null;
+  for (let i = 0; i < 60; i++) {
+    const half = (lo + hi) / 2;
+    const box = boxAlong(bbox, axis, coordinate - half, coordinate + half);
+    const candidate = intersectSafe(poly, box);
+    const area = areaOf(candidate);
+    if (candidate) best = candidate;
+    if (area >= targetM2) hi = half; else lo = half;
+    if (Math.abs(area - targetM2) <= Math.max(0.5, targetM2 * 1e-6)) break;
+  }
+  const pieces = splitPieces(best).sort((a, b) => planarAreaM2(b) - planarAreaM2(a));
+  if (!pieces[0]) return { cut: null, rest: poly, area: 0 };
+  const selected = featureOf(pieces[0]);
+  const area = planarAreaM2(pieces[0]);
+  return { cut: selected, rest: differenceSafe(poly, selected), area };
+}
+
 /** Bande de largeur `widthM` positionnée à `frac` (0..1) le long de l'axe. */
 function bandAt(poly: AnyPoly, axis: Axis, frac: number, widthM: number): { band: AnyPoly | null; rest: AnyPoly | null } {
   const bbox = turf.bbox(poly);
   const [minX, minY, maxX, maxY] = bbox;
-  const cy = (minY + maxY) / 2;
-  const cosLat = Math.max(0.1, Math.cos((cy * Math.PI) / 180));
-  const half = axis === "horizontal"
-    ? widthM / 2 / 110_540
-    : widthM / 2 / (111_320 * cosLat);
+  const half = widthM / 2;
   const center = axis === "horizontal" ? minY + (maxY - minY) * frac : minX + (maxX - minX) * frac;
   const box = boxAlong(bbox, axis, center - half, center + half);
   const band = intersectSafe(poly, box);
@@ -97,7 +129,7 @@ function bandAt(poly: AnyPoly, axis: Axis, frac: number, widthM: number): { band
 }
 
 function splitPieces(f: AnyPoly | null): Pt[][] {
-  return extractPolys(f).filter((p) => p.length >= 3 && Number.isFinite(polygonAreaM2(p)) && polygonAreaM2(p) > 0.5);
+  return extractPolys(f).filter((p) => p.length >= 3 && Number.isFinite(planarAreaM2(p)) && planarAreaM2(p) > 0.5);
 }
 
 /* ------------------------------ normalisation ------------------------------ */
@@ -105,22 +137,23 @@ function splitPieces(f: AnyPoly | null): Pt[][] {
 interface Norm { (pts: Pt[]): [number, number][] }
 
 function makeNormalizer(perimeter: Pt[]): Norm {
-  const lats = perimeter.map((p) => p.lat);
-  const lngs = perimeter.map((p) => p.lng);
-  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-  const midLat = (minLat + maxLat) / 2;
-  const mx = 111_320 * Math.max(0.1, Math.cos((midLat * Math.PI) / 180));
-  const my = 110_540;
-  const wM = Math.max(1, (maxLng - minLng) * mx);
-  const hM = Math.max(1, (maxLat - minLat) * my);
-  const scale = 100 / Math.max(wM, hM);
-  const offX = (100 - wM * scale) / 2;
-  const offY = (100 - hM * scale) / 2;
-  return (pts) => pts.map((p) => [
-    offX + (p.lng - minLng) * mx * scale,
-    100 - offY - (p.lat - minLat) * my * scale,
-  ] as [number, number]);
+  const ys = perimeter.map((p) => p.lat), xs = perimeter.map((p) => p.lng);
+  const minY = Math.min(...ys), maxY = Math.max(...ys), minX = Math.min(...xs), maxX = Math.max(...xs);
+  const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+  const scale = 100 / Math.max(w, h), offX = (100 - w * scale) / 2, offY = (100 - h * scale) / 2;
+  return (pts) => pts.map((p) => [offX + (p.lng - minX) * scale, 100 - offY - (p.lat - minY) * scale] as [number, number]);
+}
+interface MetricProjection { definition: string; forward(point: Pt): Pt; inverse(point: Pt): Pt }
+function projectionFor(perimeter: Pt[]): MetricProjection {
+  const lng = perimeter.reduce((s, p) => s + p.lng, 0) / perimeter.length;
+  const lat = perimeter.reduce((s, p) => s + p.lat, 0) / perimeter.length;
+  const zone = Math.max(1, Math.min(60, Math.floor((lng + 180) / 6) + 1));
+  const definition = `+proj=utm +zone=${zone}${lat < 0 ? " +south" : ""} +datum=WGS84 +units=m +no_defs`;
+  return {
+    definition,
+    forward: (p) => { const [x, y] = proj4("EPSG:4326", definition, [p.lng, p.lat]); return { lng: x, lat: y }; },
+    inverse: (p) => { const [lngOut, latOut] = proj4(definition, "EPSG:4326", [p.lng, p.lat]); return { lng: lngOut, lat: latOut }; },
+  };
 }
 
 /* --------------------------------- moteur --------------------------------- */
@@ -128,13 +161,8 @@ function makeNormalizer(perimeter: Pt[]): Norm {
 function resolveAxis(cfg: MorcConfig, perimeter: Pt[]): Axis {
   if (cfg.orientation === "verticale") return "vertical";
   if (cfg.orientation === "horizontale") return "horizontal";
-  const lats = perimeter.map((p) => p.lat);
-  const lngs = perimeter.map((p) => p.lng);
-  const midLat = (Math.min(...lats) + Math.max(...lats)) / 2;
-  const wM = (Math.max(...lngs) - Math.min(...lngs)) * 111_320 * Math.cos((midLat * Math.PI) / 180);
-  const hM = (Math.max(...lats) - Math.min(...lats)) * 110_540;
-  // On empile les bandes dans le sens le plus long pour limiter les lots étroits.
-  return hM >= wM ? "horizontal" : "vertical";
+  const xs = perimeter.map((p) => p.lng), ys = perimeter.map((p) => p.lat);
+  return Math.max(...ys) - Math.min(...ys) >= Math.max(...xs) - Math.min(...xs) ? "horizontal" : "vertical";
 }
 
 const perpendicular = (a: Axis): Axis => (a === "horizontal" ? "vertical" : "horizontal");
@@ -156,21 +184,28 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
   );
   if (cleanPerimeter.length > 3 && cleanPerimeter[0].lat === cleanPerimeter.at(-1)!.lat && cleanPerimeter[0].lng === cleanPerimeter.at(-1)!.lng) cleanPerimeter.pop();
   if (cleanPerimeter.length < 3) throw new Error("Le relevé doit contenir au moins trois points GPS distincts.");
-  perimeter = cleanPerimeter;
-  const source = featureOf(perimeter);
+  const originalPerimeter = cleanPerimeter;
+  const projection = projectionFor(originalPerimeter);
+  const metricPerimeter = originalPerimeter.map(projection.forward);
+  perimeter = metricPerimeter;
+  const source = featureOf(metricPerimeter);
   if (!turf.booleanValid(source)) throw new Error("Le périmètre GPS est invalide ou se croise. Corrigez les points du relevé.");
-  const totalM2 = polygonAreaM2(perimeter);
+  const totalM2 = planarAreaM2(metricPerimeter);
   if (!Number.isFinite(totalM2) || totalM2 <= 1) throw new Error("La superficie du périmètre est nulle ou invalide.");
   if (!Number.isFinite(cfg.cibleHa) || cfg.cibleHa <= 0) throw new Error("La superficie cible doit être strictement positive.");
   if (cfg.voiePrincipale && (!Number.isFinite(cfg.largeurVoieM) || cfg.largeurVoieM <= 0)) throw new Error("La largeur de la voie principale doit être positive.");
   if (cfg.voiesSecondaires && cfg.nbVoiesSec > 0 && (!Number.isFinite(cfg.largeurVoieSecM) || cfg.largeurVoieSecM <= 0)) throw new Error("La largeur des voies secondaires doit être positive.");
   const norm = makeNormalizer(perimeter);
-  const cibleM2 = Math.max(100, Math.round(cfg.cibleHa * 10_000));
+  const toGeo = (points: Pt[]) => points.map(projection.inverse);
+  const toBornes = (code: string, points: Pt[]) => bornesFor(code, toGeo(points));
+  const cibleM2 = Math.max(1, cfg.cibleHa * 10_000);
   const axis = resolveAxis(cfg, perimeter);
 
   const lots: PlanLot[] = [];
   const voies: PlanVoie[] = [];
   let working: AnyPoly | null = featureOf(perimeter);
+  let mainRoadAxis: Axis | null = null;
+  let mainRoadCoordinate: number | null = null;
 
   // --- Voie principale ---------------------------------------------------
   if (cfg.voiePrincipale && working) {
@@ -179,9 +214,14 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
       : perpendicular(axis);
     const frac = cfg.positionVoie === "laterale" ? 0.15
       : cfg.positionVoie === "centrale" || cfg.positionVoie === "traversante" ? 0.5 : 0.35;
+    const roadBox = turf.bbox(working);
+    mainRoadAxis = voieAxis;
+    mainRoadCoordinate = voieAxis === "horizontal"
+      ? roadBox[1] + (roadBox[3] - roadBox[1]) * frac
+      : roadBox[0] + (roadBox[2] - roadBox[0]) * frac;
     const { band, rest } = bandAt(working, voieAxis, frac, cfg.largeurVoieM);
     for (const p of splitPieces(band)) {
-      voies.push({ kind: "principale", largeurM: cfg.largeurVoieM, poly: norm(p), geo: p });
+      voies.push({ kind: "principale", largeurM: cfg.largeurVoieM, poly: norm(p), geo: toGeo(p) });
     }
     if (rest) working = rest;
   }
@@ -196,7 +236,7 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
       const frac = i / (cfg.nbVoiesSec + 1);
       const { band, rest } = bandAt(working, secAxis, frac, cfg.largeurVoieSecM);
       for (const p of splitPieces(band)) {
-        voies.push({ kind: "secondaire", largeurM: cfg.largeurVoieSecM, poly: norm(p), geo: p });
+        voies.push({ kind: "secondaire", largeurM: cfg.largeurVoieSecM, poly: norm(p), geo: toGeo(p) });
       }
       if (rest) working = rest;
     }
@@ -205,13 +245,13 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
   // --- Réserve familiale --------------------------------------------------
   if (cfg.reserveActive && cfg.reserveM2 > 0 && working) {
     const { cut, rest } = sliceByArea(working, axis, Math.min(cfg.reserveM2, areaOf(working) * 0.5));
-    const pieces = splitPieces(cut).sort((a, b) => polygonAreaM2(b) - polygonAreaM2(a));
+    const pieces = splitPieces(cut).sort((a, b) => planarAreaM2(b) - planarAreaM2(a));
     if (pieces[0]) {
       const g = pieces[0];
-      const a = polygonAreaM2(g);
+      const a = planarAreaM2(g);
       lots.push({
         code: "RES", part: "proprietaire", kind: "reserve",
-        poly: norm(g), geo: g, bornes: bornesFor("RES", g),
+        poly: norm(g), geo: toGeo(g), bornes: toBornes("RES", g),
         cibleM2: cfg.reserveM2, reelM2: Math.round(a), conforme: Math.abs(a - cfg.reserveM2) <= TOLERANCE_M2,
         label: `RÉSERVE ${cfg.familleNom.toUpperCase()} — ${(a / 10000).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ha`,
       });
@@ -223,14 +263,18 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
   if (cfg.collecteActive && working) {
     cfg.collecte.slice(0, cfg.nbCollecte).forEach((pc) => {
       if (!working) return;
-      const { cut, rest } = sliceByArea(working, perpendicular(axis), Math.min(pc.areaM2, areaOf(working) * 0.2));
-      const pieces = splitPieces(cut).sort((a, b) => polygonAreaM2(b) - polygonAreaM2(a));
+      const siteTarget = Math.min(pc.areaM2, areaOf(working) * 0.2);
+      const site = cfg.optim.positionCollecte && mainRoadAxis !== null && mainRoadCoordinate !== null
+        ? sliceNearCoordinate(working, mainRoadAxis, siteTarget, mainRoadCoordinate)
+        : sliceByArea(working, perpendicular(axis), siteTarget);
+      const { cut, rest } = site;
+      const pieces = splitPieces(cut).sort((a, b) => planarAreaM2(b) - planarAreaM2(a));
       if (pieces[0]) {
         const g = pieces[0];
-        const a = polygonAreaM2(g);
+        const a = planarAreaM2(g);
         lots.push({
           code: pc.id, part: "ac", kind: "collecte",
-          poly: norm(g), geo: g, bornes: bornesFor(pc.id, g),
+          poly: norm(g), geo: toGeo(g), bornes: toBornes(pc.id, g),
           cibleM2: pc.areaM2, reelM2: Math.round(a), conforme: Math.abs(a - pc.areaM2) <= TOLERANCE_M2,
           label: `${pc.type === "principal" ? "PC PRINCIPAL" : "PC SECONDAIRE"} — ${Math.round(a).toLocaleString("fr-FR")} m²`,
         });
@@ -241,7 +285,7 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
 
   // --- Lots de superficie cible ------------------------------------------
   const utiles: PlanLot[] = [];
-  const blocs = splitPieces(working).sort((a, b) => polygonAreaM2(b) - polygonAreaM2(a));
+  const blocs = splitPieces(working).sort((a, b) => planarAreaM2(b) - planarAreaM2(a));
   const residuels: Pt[][] = [];
 
   for (const bloc of blocs) {
@@ -252,14 +296,14 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
       const remArea = areaOf(rem);
       if (remArea < cibleM2 + 1) break;
       const { cut, rest, area } = sliceByArea(rem, axis, cibleM2);
-      const pieces = splitPieces(cut).sort((a, b) => polygonAreaM2(b) - polygonAreaM2(a));
+      const pieces = splitPieces(cut).sort((a, b) => planarAreaM2(b) - planarAreaM2(a));
       if (!pieces[0]) break;
       const g = pieces[0];
-      const reel = Math.round(polygonAreaM2(g));
+      const reel = Math.round(planarAreaM2(g));
       const code = `H${String(utiles.length + 1).padStart(2, "0")}`;
       utiles.push({
         code, part: "proprietaire", kind: "lot",
-        poly: norm(g), geo: g, bornes: bornesFor(code, g),
+        poly: norm(g), geo: toGeo(g), bornes: toBornes(code, g),
         cibleM2, reelM2: reel,
         conforme: Math.abs(reel - cibleM2) <= TOLERANCE_M2,
       });
@@ -289,14 +333,14 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
 
   // --- Reliquats ----------------------------------------------------------
   residuels
-    .filter((p) => polygonAreaM2(p) > 0.5)
-    .sort((a, b) => polygonAreaM2(b) - polygonAreaM2(a))
+    .filter((p) => planarAreaM2(p) > 0.5)
+    .sort((a, b) => planarAreaM2(b) - planarAreaM2(a))
     .forEach((p, i) => {
       const code = `R${String(i + 1).padStart(2, "0")}`;
-      const a = Math.round(polygonAreaM2(p));
+      const a = Math.round(planarAreaM2(p));
       lots.push({
         code, part: "proprietaire", kind: "reserve",
-        poly: norm(p), geo: p, bornes: bornesFor(code, p),
+        poly: norm(p), geo: toGeo(p), bornes: toBornes(code, p),
         cibleM2: a, reelM2: a, conforme: true,
         label: `RELIQUAT ${code} — ${a.toLocaleString("fr-FR")} m²`,
       });
@@ -304,9 +348,9 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
 
   // --- Scores -------------------------------------------------------------
   const nonConformes = utiles.filter((l) => !l.conforme).length;
-  const residuelM2 = residuels.reduce((s, p) => s + polygonAreaM2(p), 0);
-  const allocatedM2 = lots.reduce((sum, lot) => sum + (lot.geo ? polygonAreaM2(lot.geo) : 0), 0) +
-    voies.reduce((sum, voie) => sum + (voie.geo ? polygonAreaM2(voie.geo) : 0), 0);
+  const residuelM2 = residuels.reduce((s, p) => s + planarAreaM2(p), 0);
+  const allocatedM2 = lots.reduce((sum, lot) => sum + (lot.geo ? planarAreaM2(lot.geo.map(projection.forward)) : 0), 0) +
+    voies.reduce((sum, voie) => sum + (voie.geo ? planarAreaM2(voie.geo.map(projection.forward)) : 0), 0);
   const balanceErrorM2 = Math.round(totalM2 - allocatedM2);
   const superficies = utiles.length
     ? Math.round(100 - (nonConformes / utiles.length) * 100)
@@ -328,7 +372,7 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
     lots,
     voies,
     parcelle: norm(perimeter),
-    parcelleGeo: perimeter,
+    parcelleGeo: originalPerimeter,
     axis,
     score,
     conforme: nonConformes === 0 && utiles.length > 0 && Math.abs(balanceErrorM2) <= TOLERANCE_M2,
@@ -336,6 +380,8 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
     totalM2: Math.round(totalM2),
     allocatedM2: Math.round(allocatedM2),
     balanceErrorM2,
+    projection: projection.definition,
+    computationToleranceM2: TOLERANCE_M2,
     createdAt: Date.now(),
   };
 }

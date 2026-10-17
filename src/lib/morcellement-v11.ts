@@ -4,7 +4,7 @@
  */
 import type { Axis, Pt } from "./partage";
 
-export const TOLERANCE_M2 = 100;
+export const TOLERANCE_M2 = 1;
 
 export type ObjectifType = "lots_fixes" | "partage_ac" | "partage_perso" | "autre";
 export type Orientation = "auto" | "horizontale" | "verticale" | "geometrie" | "personnalisee";
@@ -138,6 +138,8 @@ export interface PlanResult {
   totalM2: number;
   allocatedM2?: number;
   balanceErrorM2?: number;
+  projection?: string;
+  computationToleranceM2?: number;
   createdAt: number;
 }
 

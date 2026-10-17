@@ -359,7 +359,7 @@ function MorcellementPage() {
           </p>
         </div>
         <div className="text-xs px-3 py-2 rounded-xl bg-warn/15 text-warn border border-warn/30 font-medium">
-          Tolérance : ±{TOLERANCE_M2} m² par lot
+          Écart de calcul cible : ±{TOLERANCE_M2} m² par lot
         </div>
       </header>
 
@@ -387,7 +387,7 @@ function MorcellementPage() {
             <Row k="Superficie levée" v={releve ? `${(releve.areaM2 / 10000).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ha` : "—"} />
             <Row k="Bornes" v={releve ? String(releve.points.length) : "—"} />
             <Row k="Localisation" v={sp ? `${sp.name} · ${sp.region}` : "—"} />
-            <Row k="Référence spatiale" v="WGS84 / UTM 30N" />
+            <Row k="Référence spatiale" v={releve?.points?.length ? "WGS84 · projection métrique locale automatique" : "WGS84"} />
           </Card>
 
           <Card title="B — Objectif de morcellement" isMobile={isMobile}>
