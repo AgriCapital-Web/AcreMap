@@ -166,7 +166,6 @@ function Icon({ name }: { name: string }) {
   switch (name) {
     case "close": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>;
     case "menu": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
-    case "close": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="m6 6 12 12M18 6 6 18" /></svg>;
     case "settings": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19 13.5a7.2 7.2 0 0 0 0-3l2-1.5-2-3.5-2.4 1a7.2 7.2 0 0 0-2.6-1.5L13.5 2h-4L9 5a7.2 7.2 0 0 0-2.6 1.5l-2.4-1-2 3.5 2 1.5a7.2 7.2 0 0 0 0 3l-2 1.5 2 3.5 2.4-1A7.2 7.2 0 0 0 9 19l.5 3h4l.5-3a7.2 7.2 0 0 0 2.6-1.5l2.4 1 2-3.5z" transform="translate(0 0) scale(.9) translate(1.3 1.3)" /></svg>;
     case "home": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M3 12L12 4l9 8" /><path d="M5 10v10h14V10" /></svg>;
     case "crosshair": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 3v4M12 17v4M3 12h4M17 12h4" /><circle cx="12" cy="12" r="2" fill={stroke} /></svg>;
