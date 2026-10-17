@@ -44,6 +44,7 @@ function IntegrationSettingsPage() {
   const [showSecrets, setShowSecrets] = useState(false);
   const [copied, setCopied] = useState("");
   const [migrating, setMigrating] = useState(false);
+  const [migrationToken, setMigrationToken] = useState("");
 
   async function refresh() {
     setError("");
@@ -77,7 +78,8 @@ function IntegrationSettingsPage() {
     setError("");
     setSuccess("");
     try {
-      const result = await migrate();
+      const result = await migrate({ data: { accessToken: migrationToken.trim() || undefined } });
+      setMigrationToken("");
       setSuccess(result.message);
       await refresh();
     } catch (e) {
@@ -107,15 +109,11 @@ function IntegrationSettingsPage() {
           {migrating ? "Migration en cours…" : "Exécuter la migration"}
         </button>
       </div>
-      <p className="text-sm">La migration est versionnée et conçue pour être relancée sans dupliquer les objets. Elle exige <code>SUPABASE_ACCESS_TOKEN</code> côté serveur Vercel, avec un jeton Supabase limité au projet AcreMap et autorisé en écriture sur la base. Aucun SQL libre n’est accepté depuis le navigateur.</p>
-      <div className="rounded-lg bg-muted/60 p-3 text-sm">
-        <p className="font-semibold">Préparer le jeton une seule fois</p>
-        <ol className="mt-2 list-decimal space-y-1 pl-5">
-          <li>Dans Supabase, créez un jeton d’accès à portée limitée au projet AcreMap.</li>
-          <li>Accordez uniquement l’accès Database en écriture nécessaire à la migration.</li>
-          <li>Dans Vercel → projet <b>acremap</b> → Settings → Environment Variables, ajoutez <code>SUPABASE_ACCESS_TOKEN</code> et <code>SUPABASE_PROJECT_REF=ckkjqpsoavrikgiuuktf</code> pour Production, Preview et Development si vous souhaitez y lancer les migrations.</li>
-          <li>Redéployez, revenez ici et cliquez sur « Exécuter la migration ».</li>
-        </ol>
+      <p className="text-sm">La migration est versionnée, contrôlée côté serveur et conçue pour être relancée sans dupliquer les objets. Aucun SQL libre n’est accepté depuis le navigateur. Pour lancer la migration sans attendre une configuration Vercel, collez un jeton Supabase Management API autorisé sur le projet AcreMap ci-dessous : il est transmis uniquement à cette requête, n’est pas enregistré et est effacé après succès.</p>
+      <div className="min-w-0 space-y-2 rounded-lg bg-muted/60 p-3">
+        <label htmlFor="acremap-migration-token" className="block text-sm font-semibold">Jeton temporaire Supabase Management API (facultatif si déjà configuré sur Vercel)</label>
+        <input id="acremap-migration-token" type="password" autoComplete="off" spellCheck={false} value={migrationToken} onChange={(event) => setMigrationToken(event.target.value)} placeholder="Collez ici le jeton Supabase" className="w-full min-w-0 rounded-lg border bg-background px-3 py-2 text-sm" />
+        <p className="break-words text-xs text-muted-foreground">Créez le jeton dans les paramètres d’accès de Supabase. Utilisez un jeton limité au projet AcreMap et aux droits de base de données nécessaires. Ne le partagez pas et ne l’enregistrez pas dans un document.</p>
       </div>
     </section>
 
