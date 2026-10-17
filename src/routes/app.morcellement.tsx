@@ -349,7 +349,7 @@ function MorcellementPage() {
   }));
 
   return (
-    <div className="p-3 sm:p-4 lg:p-8 max-w-[1600px] mx-auto space-y-4 lg:space-y-5">
+    <div className="mx-auto w-full min-w-0 max-w-[1600px] overflow-x-clip p-3 sm:p-4 lg:p-8 space-y-4 lg:space-y-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="text-xs uppercase tracking-wider text-muted-foreground">Découpage intelligent</div>
@@ -363,9 +363,9 @@ function MorcellementPage() {
         </div>
       </header>
 
-      <div className="grid xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)] gap-4 lg:gap-5 items-start">
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:gap-5 items-start xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         {/* ---------------- Colonne configuration ---------------- */}
-        <div className="space-y-3 lg:space-y-4">
+        <div className="min-w-0 space-y-3 lg:space-y-4">
           <Card title="A — Parcelle et relevé" defaultOpen isMobile={isMobile} alwaysOpen>
             <Field label="Parcelle">
               <SearchSelect value={parcelleId} options={parcelleOptions} onChange={setParcelleId}
@@ -562,7 +562,7 @@ function MorcellementPage() {
         </div>
 
         {/* ---------------- Colonne aperçu ---------------- */}
-        <div className="space-y-3 lg:space-y-4">
+        <div className="min-w-0 space-y-3 lg:space-y-4">
           <section className="bg-card rounded-2xl shadow-card overflow-hidden">
             <div className="p-3 border-b flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-semibold text-sm sm:text-base">Prévisualisation</h2>
@@ -653,7 +653,7 @@ function MorcellementPage() {
                 </div>
 
                 {/* Téléphone : deux colonnes de fiches */}
-                <div className="grid grid-cols-2 gap-2 p-2 lg:hidden max-h-[460px] overflow-y-auto">
+                <div className="grid min-w-0 grid-cols-1 min-[420px]:grid-cols-2 gap-2 p-2 lg:hidden max-h-[460px] overflow-y-auto">
                   {lots.map((l) => {
                     const ecart = l.reelM2 - l.cibleM2;
                     return (
