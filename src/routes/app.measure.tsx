@@ -12,7 +12,7 @@ import {
 } from "@/lib/gps";
 import { db, isBrowser } from "@/lib/db";
 import { syncEntity, outboxCount } from "@/lib/sync";
-import { prefetchTilesAround, keepScreenAwake } from "@/lib/offline";
+import { keepScreenAwake } from "@/lib/offline";
 import { useAuth } from "@/lib/auth";
 import { formatArea, formatDistance } from "@/lib/format";
 import { feedbackError, feedbackMark, feedbackSuccess, unlockAudio, notify, requestNotificationPermission } from "@/lib/feedback";
@@ -91,7 +91,6 @@ function MeasurePage() {
   const [paused, setPaused] = useState(false);
   const [satellite, setSatellite] = useState(true);
   const [offlineSchematic, setOfflineSchematic] = useState(() => typeof navigator !== "undefined" && !navigator.onLine);
-  const [tilePrefetchMessage, setTilePrefetchMessage] = useState<string | null>(null);
   const [locateRequest, setLocateRequest] = useState(0);
   const [unit, setUnit] = useState<"ha" | "m2" | "km2">("ha");
   const [current, setCurrent] = useState<GpsPoint | null>(null);
@@ -211,8 +210,6 @@ function MeasurePage() {
       setGpsConfig(configFromCalibration(res));
       setBestAcc(res.bestAccuracyM);
       if (res.quality === "insuffisant") feedbackError(); else feedbackSuccess();
-      // Les tuiles de la zone calibrée sont mises en cache dès maintenant.
-      void prefetchTilesAround(res.center.lat, res.center.lng, 3);
     } catch (e: any) {
       feedbackError();
       setError(e?.message ?? "Calibration impossible.");
@@ -235,14 +232,6 @@ function MeasurePage() {
     setRunning(true);
     // Garde l'écran allumé pendant le levé (continuité du tracé)
     void keepScreenAwake().then((w) => { wakeRef.current = w; });
-    // Pré-chargement des tuiles autour de la position de départ (navigation hors ligne)
-    if (isBrowser() && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => { void prefetchTilesAround(pos.coords.latitude, pos.coords.longitude, 3); },
-        () => {},
-        { enableHighAccuracy: true, timeout: 8000 },
-      );
-    }
   }
   function togglePause() {
     setPaused((p) => {
@@ -705,7 +694,7 @@ function MeasurePage() {
           <div className="bg-card rounded-2xl p-5 sm:p-6 w-full max-w-md text-center shadow-elevated">
             <h2 className="text-xl font-bold">Prêt pour la levée GPS</h2>
             <p className="text-sm text-muted-foreground mt-2">
-              La levée utilise le GPS du téléphone, pas la couverture mobile. Elle peut donc continuer sans réseau si le GPS est activé et si cette page a déjà été chargée sur l'appareil. Le premier positionnement peut prendre plus de temps hors service.
+              Après installation et première connexion sur cet appareil, les écrans de la levée restent disponibles localement même après fermeture ou redémarrage. Sur le terrain, activez le GPS et attendez le premier positionnement : Internet n'est pas nécessaire. Le premier fix peut prendre plus de temps hors service.
             </p>
             <p className="text-xs text-muted-foreground mt-2">
               Le fond cartographique doit être préparé avant le départ pour voir les images hors ligne. Sans carte préchargée, AcreMap affiche un fond schématique et conserve les points GPS.
@@ -750,28 +739,8 @@ function MeasurePage() {
               <span>Fond schématique sans réseau</span>
               <input type="checkbox" checked={offlineSchematic} onChange={(e) => setOfflineSchematic(e.target.checked)} className="w-5 h-5" />
             </label>
-            <button
-              type="button"
-              onClick={() => {
-                if (!current) {
-                  setTilePrefetchMessage("Attendez que le GPS obtienne une position avant de préparer la carte.");
-                  return;
-                }
-                setTilePrefetchMessage("Préparation de la carte en cours… gardez AcreMap ouvert et connecté.");
-                void prefetchTilesAround(current.lat, current.lng, 3).then((count) => {
-                  setTilePrefetchMessage(count > 0
-                    ? "Préchargement demandé pour environ 3 km autour de votre position. Attendez la fin avant de partir."
-                    : "Préchargement indisponible sur cet appareil.");
-                }).catch(() => setTilePrefetchMessage("Préchargement impossible. Vérifiez la connexion puis réessayez."));
-              }}
-              disabled={!networkOnline || !current}
-              className="w-full rounded-lg border px-3 py-2.5 text-sm font-semibold disabled:opacity-40"
-            >
-              Préparer la carte pour le terrain
-            </button>
-            {tilePrefetchMessage && <p role="status" className="text-xs text-muted-foreground">{tilePrefetchMessage}</p>}
             <p className="text-xs text-muted-foreground">
-              Le GPS du téléphone peut fonctionner sans SIM ni données mobiles. Ouvrez AcreMap une fois en ligne avant le départ, puis gardez cette page ouverte pendant le levé. Sans tuiles téléchargées, le fond schématique reste disponible.
+              Après l'installation et une première connexion sur cet appareil, AcreMap conserve automatiquement ses écrans et ressources. Il n'est pas nécessaire de laisser l'application ouverte pendant le trajet. Le GPS fonctionne sans réseau ; les images détaillées de la carte ne sont disponibles hors ligne que si elles ont déjà été mises en cache par leur fournisseur. Sinon, le fond schématique permet de repérer et enregistrer les points.
             </p>
             <label className="flex items-center justify-between text-sm">
               <span>Unité de surface</span>
