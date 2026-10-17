@@ -69,6 +69,7 @@ begin
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   );
+  alter table public.morcellement_plans add column if not exists parcelle_id text;
   alter table public.morcellement_plans add column if not exists measurement_id text;
   alter table public.morcellement_plans add column if not exists reference text;
   alter table public.morcellement_plans add column if not exists config jsonb;
