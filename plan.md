@@ -268,6 +268,16 @@ create index if not exists measurements_measured_at_idx on public.measurements(m
 commit;
 ```
 
+## Levés GPS en zone blanche (sans réseau mobile)
+
+Le GNSS/GPS du téléphone peut fournir une position sans carte SIM, sans Wi‑Fi et sans données mobiles. Il faut toutefois que l'appareil voie suffisamment de satellites ; le premier fix peut être plus lent à froid, en forêt dense, près de bâtiments ou dans une vallée. La précision dépend du téléphone et de l'environnement, pas de la connexion Internet.
+
+Dans AcreMap, l'écran de levée garde les points, le tracé, les contrôles qualité et les brouillons dans IndexedDB. Le service worker conserve l'application après un premier chargement en ligne. En zone blanche, la levée reste locale ; les écritures cloud restent dans la file et sont renvoyées lors du retour du réseau. Le statut de synchronisation n'est donc pas une confirmation serveur tant que la connexion n'est pas revenue.
+
+Le fond cartographique est distinct du GPS : les tuiles doivent avoir été téléchargées avant de partir. La page de levée propose un préchargement de la zone autour de la position GPS. Quand le téléphone passe hors ligne, un fond schématique est activé automatiquement afin que les points et le polygone restent visibles même si aucune tuile n'est disponible. Le bouton des couches permet d'afficher les cartes mises en cache si elles existent.
+
+Limites réelles à respecter : le navigateur doit avoir déjà installé le service worker et téléchargé les ressources de l'application ; les données de parcelles à consulter doivent avoir été synchronisées sur cet appareil ; le stockage local peut être purgé par le système ; le navigateur peut suspendre le GPS si l'écran ou l'application est mis en arrière-plan. Garder AcreMap ouvert et l'écran éveillé pendant le levé est recommandé. Aucune application Web ne peut promettre une précision GPS fixe ou une exécution continue garantie lorsque le système ferme le navigateur.
+
 ## Mode hors ligne terrain et réseau faible
 
 - Le service worker est enregistré depuis la racine, y compris depuis la connexion, et précharge les routes principales. Les ressources et tuiles déjà consultées/téléchargées sont conservées localement.

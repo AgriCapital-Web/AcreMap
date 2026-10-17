@@ -90,6 +90,8 @@ function MeasurePage() {
   const [started, setStarted] = useState(false);
   const [paused, setPaused] = useState(false);
   const [satellite, setSatellite] = useState(true);
+  const [offlineSchematic, setOfflineSchematic] = useState(() => typeof navigator !== "undefined" && !navigator.onLine);
+  const [tilePrefetchMessage, setTilePrefetchMessage] = useState<string | null>(null);
   const [unit, setUnit] = useState<"ha" | "m2" | "km2">("ha");
   const [current, setCurrent] = useState<GpsPoint | null>(null);
   const [filteredCur, setFilteredCur] = useState<GpsPoint | null>(null);
@@ -137,7 +139,7 @@ function MeasurePage() {
 
   useEffect(()=>{let active=true;void(async()=>{try{const row=await db().meta.get("survey.activeDraft");const saved=row?.value as {userId:string;parcelleId?:string;savedAt:number;started:boolean;points:MeasurementPoint[];trace:GpsPoint[];unit:"ha"|"m2"|"km2";autoMark100:boolean;bestAcc:number;accSamples:number[];acceptedCount:number;rejectedCount:number;qaHistory:{ts:number;acc:number;ok:boolean}[];pauses:{startedAt:number;endedAt?:number;durationMs?:number}[];calibration:CalibrationResult|null;gpsConfig:GpsConfig}|undefined;if(active&&saved&&saved.userId===user?.id&&saved.started&&Date.now()-saved.savedAt<7*24*60*60_000){if(window.confirm("Un levé interrompu a été retrouvé sur cet appareil. Reprendre ce levé ?")){setPoints(saved.points??[]);setTrace(saved.trace??[]);setStarted(true);startedRef.current=true;setUnit(saved.unit??"ha");setAutoMark100(saved.autoMark100??true);setBestAcc(saved.bestAcc??999);setAccSamples(saved.accSamples??[]);setAcceptedCount(saved.acceptedCount??0);setRejectedCount(saved.rejectedCount??0);setQaHistory(saved.qaHistory??[]);setPauses(saved.pauses??[]);setCalibration(saved.calibration??null);if(saved.gpsConfig)setGpsConfig(saved.gpsConfig);if(saved.parcelleId&&saved.parcelleId!==parcelleId)navigate({to:"/app/measure",search:{parcelleId:saved.parcelleId} as never});const last=saved.trace?.[saved.trace.length-1]??saved.points?.[saved.points.length-1];if(last)stablePosRef.current={lat:last.lat,lng:last.lng,accuracy:last.accuracy,ts:last.ts};walkedMetersRef.current=(saved.trace??[]).reduce((sum,p,i,a)=>i?sum+haversine(a[i-1],p):0,0);const every=Math.max(1,saved.gpsConfig?.autoMarkEveryMeters??DEFAULT_GPS_CONFIG.autoMarkEveryMeters);nextAutoMarkAtRef.current=(Math.floor(walkedMetersRef.current/every)+1)*every;}else await db().meta.delete("survey.activeDraft");}}catch(e){console.warn("[survey] restauration locale impossible",e);}if(active)setDraftReady(true);})();return()=>{active=false;};},[user?.id]);
   useEffect(()=>{if(!draftReady||!started||!user||points.length===0)return;const timer=setTimeout(()=>{void db().meta.put({key:"survey.activeDraft",value:{userId:user.id,parcelleId,savedAt:Date.now(),started,points,trace,unit,autoMark100,bestAcc,accSamples,acceptedCount,rejectedCount,qaHistory,pauses,calibration,gpsConfig}}).catch(e=>console.warn("[survey] sauvegarde locale différée",e));},800);return()=>clearTimeout(timer);},[draftReady,started,user?.id,parcelleId,points,trace,unit,autoMark100,bestAcc,accSamples,acceptedCount,rejectedCount,qaHistory,pauses,calibration,gpsConfig]);
-  useEffect(()=>{const refresh=()=>{setNetworkOnline(navigator.onLine);void outboxCount().then(setQueuedChanges).catch(()=>{});};refresh();window.addEventListener("online",refresh);window.addEventListener("offline",refresh);const timer=setInterval(refresh,5000);return()=>{window.removeEventListener("online",refresh);window.removeEventListener("offline",refresh);clearInterval(timer);};},[]);
+  useEffect(()=>{const refresh=()=>{setNetworkOnline(navigator.onLine);void outboxCount().then(setQueuedChanges).catch(()=>{});};const onOnline=()=>{setOfflineSchematic(false);refresh();};const onOffline=()=>{setOfflineSchematic(true);refresh();};refresh();window.addEventListener("online",onOnline);window.addEventListener("offline",onOffline);const timer=setInterval(refresh,5000);return()=>{window.removeEventListener("online",onOnline);window.removeEventListener("offline",onOffline);clearInterval(timer);};},[]);
   useEffect(() => {
     if (!running) return;
     setError(null);
@@ -455,6 +457,7 @@ function MeasurePage() {
       <div className="absolute inset-0">
         <MapView
           satellite={satellite}
+          schematic={offlineSchematic}
           current={filteredCur}
           currentAccuracy={filteredCur?.accuracy}
           perimeter={points}
@@ -573,9 +576,12 @@ function MeasurePage() {
       {/* OPTIONS RAPIDES — bouton flottant gauche */}
       <div className="absolute top-12 left-2 z-[500] flex flex-col gap-2">
         <button
-          onClick={() => setSatellite((s) => !s)}
-          className="p-2 rounded-full bg-card/95 backdrop-blur shadow-elevated"
-          title={satellite ? "Vue carte" : "Vue satellite"}
+          onClick={() => {
+            if (!networkOnline) setOfflineSchematic((s) => !s);
+            else setSatellite((s) => !s);
+          }}
+          className={`p-2 rounded-full backdrop-blur shadow-elevated ${offlineSchematic ? "bg-primary text-primary-foreground" : "bg-card/95"}`}
+          title={offlineSchematic ? "Fond schématique actif — toucher pour afficher les cartes en cache" : satellite ? "Vue carte" : "Vue satellite"}
         >
           <Layers className="w-4 h-4" />
         </button>
@@ -621,7 +627,7 @@ function MeasurePage() {
 
       {/* DOCK BAS — actions principales */}
       <div className="absolute left-2 right-2 z-[1200] space-y-2 bottom-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-        {(!networkOnline||queuedChanges>0)&&<div role="status" className="mx-auto w-fit max-w-full rounded-full bg-card/95 px-3 py-1.5 text-[11px] font-semibold shadow-elevated border">{networkOnline?"Réseau disponible":"Hors ligne — levé conservé sur cet appareil"}{queuedChanges>0?" · "+queuedChanges+" changement(s) en attente":""}</div>}
+        {(!networkOnline||queuedChanges>0)&&<div role="status" className="mx-auto w-fit max-w-full rounded-full bg-card/95 px-3 py-1.5 text-[11px] font-semibold shadow-elevated border">{networkOnline?"Réseau disponible":"HORS LIGNE · GPS local actif si autorisé · levé conservé sur cet appareil"}{queuedChanges>0?" · "+queuedChanges+" changement(s) en attente":""}</div>}
         {error && (
           <div className="px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs text-center shadow-elevated">
             {error}
@@ -688,9 +694,13 @@ function MeasurePage() {
           <div className="bg-card rounded-2xl p-5 sm:p-6 w-full max-w-md text-center shadow-elevated">
             <h2 className="text-xl font-bold">Prêt pour la levée GPS</h2>
             <p className="text-sm text-muted-foreground mt-2">
-              Ce bouton ouvre seulement l'interface : le GPS s'active et affiche votre position,
-              mais <strong>aucun tracé n'est enregistré</strong>. Placez-vous ensuite au point de
-              départ et appuyez sur « MARQUER LE DÉPART » pour lancer réellement la levée.
+              La levée utilise le GPS du téléphone, pas la couverture mobile. Elle peut donc continuer sans réseau si le GPS est activé et si cette page a déjà été chargée sur l'appareil. Le premier positionnement peut prendre plus de temps hors service.
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              Le fond cartographique doit être préparé avant le départ pour voir les images hors ligne. Sans carte préchargée, AcreMap affiche un fond schématique et conserve les points GPS.
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              Ce bouton ouvre l'interface sans enregistrer de tracé. Attendez la position GPS, puis appuyez sur « MARQUER LE DÉPART ».
             </p>
             <button
               onClick={openSurvey}
@@ -725,6 +735,33 @@ function MeasurePage() {
               <span>Vue satellite</span>
               <input type="checkbox" checked={satellite} onChange={(e) => setSatellite(e.target.checked)} className="w-5 h-5" />
             </label>
+            <label className="flex items-center justify-between gap-3 text-sm">
+              <span>Fond schématique sans réseau</span>
+              <input type="checkbox" checked={offlineSchematic} onChange={(e) => setOfflineSchematic(e.target.checked)} className="w-5 h-5" />
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                if (!current) {
+                  setTilePrefetchMessage("Attendez que le GPS obtienne une position avant de préparer la carte.");
+                  return;
+                }
+                setTilePrefetchMessage("Préparation de la carte en cours… gardez AcreMap ouvert et connecté.");
+                void prefetchTilesAround(current.lat, current.lng, 3).then((count) => {
+                  setTilePrefetchMessage(count > 0
+                    ? "Préchargement demandé pour environ 3 km autour de votre position. Attendez la fin avant de partir."
+                    : "Préchargement indisponible sur cet appareil.");
+                }).catch(() => setTilePrefetchMessage("Préchargement impossible. Vérifiez la connexion puis réessayez."));
+              }}
+              disabled={!networkOnline || !current}
+              className="w-full rounded-lg border px-3 py-2.5 text-sm font-semibold disabled:opacity-40"
+            >
+              Préparer la carte pour le terrain
+            </button>
+            {tilePrefetchMessage && <p role="status" className="text-xs text-muted-foreground">{tilePrefetchMessage}</p>}
+            <p className="text-xs text-muted-foreground">
+              Le GPS du téléphone peut fonctionner sans SIM ni données mobiles. Ouvrez AcreMap une fois en ligne avant le départ, puis gardez cette page ouverte pendant le levé. Sans tuiles téléchargées, le fond schématique reste disponible.
+            </p>
             <label className="flex items-center justify-between text-sm">
               <span>Unité de surface</span>
               <select value={unit} onChange={(e) => setUnit(e.target.value as any)} className="px-2 py-1 rounded border bg-background text-sm">
