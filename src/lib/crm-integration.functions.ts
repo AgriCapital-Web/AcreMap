@@ -24,7 +24,9 @@ export const publishMorcellementToCrm = createServerFn({ method: "POST" })
   let url: URL;
   try { url = new URL(endpoint); } catch { throw new Error("CRM_WEBHOOK_URL n'est pas une URL valide."); }
   if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") throw new Error("Le webhook CRM doit utiliser HTTPS.");
-  const payload = JSON.stringify({ event: "morcellement.published", event_id: randomUUID(), occurred_at: new Date().toISOString(), owner_id: data.plan.owner_id ?? null, plan: data.plan, lots: data.lots });
+  const assignedOwnerIds = [...new Set(data.lots.map((lot) => lot.assignee_owner_id).filter((id): id is string => Boolean(id)))];
+  const ownerId = data.plan.owner_id ?? (assignedOwnerIds.length === 1 ? assignedOwnerIds[0] : null);
+  const payload = JSON.stringify({ event: "morcellement.published", event_id: randomUUID(), occurred_at: new Date().toISOString(), owner_id: ownerId, plan: { ...data.plan, owner_id: ownerId }, lots: data.lots });
   const signature = createHmac("sha256", secret).update(payload).digest("hex");
   const response = await fetch(url.toString(), { method: "POST", headers: { "content-type": "application/json", "x-acremap-signature": "sha256=" + signature }, body: payload, signal: AbortSignal.timeout(12000) });
   if (!response.ok) throw new Error("Le webhook CRM a répondu avec le statut " + response.status + ".");
