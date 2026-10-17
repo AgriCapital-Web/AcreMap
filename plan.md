@@ -1,14 +1,15 @@
-# Plan d'installation SQL — AcreMap
+# Plan de migration SQL — AcreMap (source canonique : migration versionnée)
 
 Ce document regroupe le SQL nécessaire à l'intégration AcreMap ↔ CRM. Le morcellement géométrique lui-même s'exécute dans l'application AcreMap (Turf.js) : aucune IA externe, aucun crédit IA ni moteur de calcul distant n'est requis.
 
 ## 1. Avant exécution
 
-1. Ouvrir le projet Supabase réellement utilisé par AcreMap.
-2. Vérifier que les tables applicatives `public.lots` et les mécanismes d'authentification Supabase existent.
-3. Copier le script de la section 2 dans le SQL Editor, puis exécuter une seule fois. Le script est idempotent.
-4. Ne pas exécuter ce script dans la base CRM : le CRM a sa propre migration `20261016250000_acremap_integration`.
-5. Après exécution, déployer le code AcreMap et renseigner les variables serveur décrites dans `.env.example`.
+1. Le projet cible est Supabase AcreMap `ckkjqpsoavrikgiuuktf`, jamais la base CRM `rfzfsmpsuempafhkqhra`.
+2. La migration complète et versionnée est `supabase/migrations/20261017030000_acremap_complete_setup.sql`.
+3. La méthode recommandée est Paramètres & intégrations → Exécuter la migration. Le bouton exécute le script fixe côté serveur via la Supabase Management API.
+4. Pour autoriser le bouton, configurer `SUPABASE_ACCESS_TOKEN` et `SUPABASE_PROJECT_REF=ckkjqpsoavrikgiuuktf` comme secrets/environnement serveur Vercel, puis redéployer.
+5. Le SQL de la section 2 ci-dessous est l'ancien script de base pour référence. Il ne remplace pas la migration versionnée complète du fichier ci-dessus.
+6. Ne jamais exécuter le script AcreMap dans la base CRM. Le CRM a ses propres migrations.
 
 ## 2. SQL complet pour la base AcreMap
 
@@ -120,3 +121,12 @@ La migration prépare :
 - le bucket privé `imports` et des politiques Storage limitant les fichiers au dossier correspondant à l'identifiant de l'utilisateur connecté.
 
 Cette migration ne crée pas les tables métier de base qui doivent déjà exister dans AcreMap (notamment `public.lots`) et ne modifie pas la base CRM. Elle s'arrête explicitement si le schéma AcreMap de base est absent. Les données et les buckets existants ne sont pas supprimés.
+
+
+## 7. Migration complète et bouton d'administration
+
+La migration versionnée complète `20261017030000_acremap_complete_setup` est conservée dans `supabase/migrations/20261017030000_acremap_complete_setup.sql` et est également utilisée par le bouton **Exécuter la migration** de `/app/parametres`. Elle complète le registre des propriétaires CRM, les colonnes et index des lots, la table des plans de morcellement, la relation vers le propriétaire CRM, le journal des migrations et le bucket privé `imports` avec ses politiques RLS.
+
+Le bouton ne peut pas contourner les droits Supabase : il nécessite un jeton Management API configuré dans Vercel sous `SUPABASE_ACCESS_TOKEN`. Le jeton reste côté serveur. La clé `SUPABASE_SERVICE_ROLE_KEY` est également requise pour les opérations d'administration des comptes, mais ne doit jamais être exposée au navigateur.
+
+La page Paramètres affiche les variables présentes/manquantes sans révéler leurs valeurs et génère localement une clé API AcreMap ainsi qu'un secret HMAC. Il faut copier ces deux valeurs dans Vercel/AcreMap puis dans CRM → Paramètres → AcreMap API. Les valeurs ne sont pas stockées automatiquement dans Git, la base ou le navigateur.
