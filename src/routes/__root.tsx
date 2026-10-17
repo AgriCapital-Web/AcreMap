@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect } from "react";
 import {
   Outlet,
   Link,
@@ -119,7 +120,19 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    let disposed = false, reloading = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const onControllerChange = () => { if (!disposed && !reloading) { reloading = true; window.location.reload(); } };
+    navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
+    void navigator.serviceWorker.register("/sw.js", { scope: "/" }).then((registration) => {
+      if (disposed) return;
+      void registration.update().catch(() => {});
+      timer = setInterval(() => { void registration.update().catch(() => {}); }, 60 * 60_000);
+    }).catch((error) => console.warn("[pwa] service worker indisponible", error));
+    return () => { disposed = true; if (timer) clearInterval(timer); navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange); };
+  }, []);
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />

@@ -42,6 +42,7 @@ export async function lastPullAt(): Promise<number | null> {
 export async function warmOfflineCache(): Promise<{ pulled: number } | null> {
   if (!isBrowser()) return null;
   await cacheReferenceData();
+  try { await navigator.storage?.persist?.(); } catch { /* browser may deny persistent storage */ }
   if (!navigator.onLine) return null;
   try {
     await flushOutbox();
@@ -110,4 +111,6 @@ export function startOfflineWarmup() {
   const run = () => { void warmOfflineCache(); };
   setTimeout(run, 1500);
   window.addEventListener("online", run);
+  window.addEventListener("focus", run);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) run(); });
 }

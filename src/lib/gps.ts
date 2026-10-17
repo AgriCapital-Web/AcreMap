@@ -125,7 +125,7 @@ export interface WatchHandle { stop: () => void; }
 
 export type Listener = (p: GpsPoint, filtered: GpsPoint) => void;
 
-export function startWatch(listener: Listener, cfg: GpsConfig = DEFAULT_GPS_CONFIG): WatchHandle {
+export function startWatch(listener: Listener, cfg: GpsConfig = DEFAULT_GPS_CONFIG, onError?: (message: string) => void): WatchHandle {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     return { stop: () => {} };
   }
@@ -161,7 +161,7 @@ export function startWatch(listener: Listener, cfg: GpsConfig = DEFAULT_GPS_CONF
       last = raw;
       listener(raw, filtered);
     },
-    (err) => console.warn("GPS error", err),
+    (err) => { console.warn("GPS error",err); onError?.(err.code===1?"Autorisez la localisation GPS pour poursuivre le levé.":err.code===2?"Position GPS indisponible. Vérifiez le GPS du téléphone et dégagez le ciel.":"Le GPS tarde à répondre. Gardez l'écran ouvert et réessayez."); },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 30_000 }
   );
   return { stop: () => navigator.geolocation.clearWatch(id) };

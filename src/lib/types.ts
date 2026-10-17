@@ -73,6 +73,9 @@ export interface Measurement {
   unit: "ha" | "m2" | "km2";
   deviceProfile?: DeviceProfile;
   qa?: MeasurementQA;
+  offlineCreated?: boolean;
+  syncState?: "pending" | "synced" | "error";
+  syncedAt?: number;
   notes?: string;
 }
 

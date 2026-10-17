@@ -11,7 +11,7 @@ import {
   type CalibrationResult, type FieldValidation, type GpsConfig,
 } from "@/lib/gps";
 import { db, isBrowser } from "@/lib/db";
-import { syncEntity } from "@/lib/sync";
+import { syncEntity, outboxCount } from "@/lib/sync";
 import { prefetchTilesAround, keepScreenAwake } from "@/lib/offline";
 import { useAuth } from "@/lib/auth";
 import { formatArea, formatDistance } from "@/lib/format";
@@ -104,6 +104,8 @@ function MeasurePage() {
   // Marquage instantané — pas d'état de capture progressive
   const [autoMark100, setAutoMark100] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [networkOnline,setNetworkOnline]=useState(()=>typeof navigator==="undefined"?true:navigator.onLine);
+  const [queuedChanges,setQueuedChanges]=useState(0);
   const [statsOpen, setStatsOpen] = useState(true);
   const [qaOpen, setQaOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -118,8 +120,11 @@ function MeasurePage() {
   const [fieldCheck, setFieldCheck] = useState<FieldValidation | null>(null);
   const [checkOpen, setCheckOpen] = useState(false);
   const [pendingSubmit, setPendingSubmit] = useState(false);
+  const [draftReady,setDraftReady]=useState(false);
   const lastAutoRef = useRef<GpsPoint | null>(null);
   const stablePosRef = useRef<GpsPoint | null>(null);
+  const walkedMetersRef = useRef(0);
+  const nextAutoMarkAtRef = useRef(DEFAULT_GPS_CONFIG.autoMarkEveryMeters);
   const watchRef = useRef<{ stop: () => void } | null>(null);
   const pausedRef = useRef(false);
   const startedRef = useRef(false);
@@ -130,6 +135,9 @@ function MeasurePage() {
   useEffect(() => { startedRef.current = started; }, [started]);
   useEffect(() => { cfgRef.current = gpsConfig; }, [gpsConfig]);
 
+  useEffect(()=>{let active=true;void(async()=>{try{const row=await db().meta.get("survey.activeDraft");const saved=row?.value as {userId:string;parcelleId?:string;savedAt:number;started:boolean;points:MeasurementPoint[];trace:GpsPoint[];unit:"ha"|"m2"|"km2";autoMark100:boolean;bestAcc:number;accSamples:number[];acceptedCount:number;rejectedCount:number;qaHistory:{ts:number;acc:number;ok:boolean}[];pauses:{startedAt:number;endedAt?:number;durationMs?:number}[];calibration:CalibrationResult|null;gpsConfig:GpsConfig}|undefined;if(active&&saved&&saved.userId===user?.id&&saved.started&&Date.now()-saved.savedAt<7*24*60*60_000){if(window.confirm("Un levé interrompu a été retrouvé sur cet appareil. Reprendre ce levé ?")){setPoints(saved.points??[]);setTrace(saved.trace??[]);setStarted(true);startedRef.current=true;setUnit(saved.unit??"ha");setAutoMark100(saved.autoMark100??true);setBestAcc(saved.bestAcc??999);setAccSamples(saved.accSamples??[]);setAcceptedCount(saved.acceptedCount??0);setRejectedCount(saved.rejectedCount??0);setQaHistory(saved.qaHistory??[]);setPauses(saved.pauses??[]);setCalibration(saved.calibration??null);if(saved.gpsConfig)setGpsConfig(saved.gpsConfig);if(saved.parcelleId&&saved.parcelleId!==parcelleId)navigate({to:"/app/measure",search:{parcelleId:saved.parcelleId} as never});const last=saved.trace?.[saved.trace.length-1]??saved.points?.[saved.points.length-1];if(last)stablePosRef.current={lat:last.lat,lng:last.lng,accuracy:last.accuracy,ts:last.ts};walkedMetersRef.current=(saved.trace??[]).reduce((sum,p,i,a)=>i?sum+haversine(a[i-1],p):0,0);const every=Math.max(1,saved.gpsConfig?.autoMarkEveryMeters??DEFAULT_GPS_CONFIG.autoMarkEveryMeters);nextAutoMarkAtRef.current=(Math.floor(walkedMetersRef.current/every)+1)*every;}else await db().meta.delete("survey.activeDraft");}}catch(e){console.warn("[survey] restauration locale impossible",e);}if(active)setDraftReady(true);})();return()=>{active=false;};},[user?.id]);
+  useEffect(()=>{if(!draftReady||!started||!user||points.length===0)return;const timer=setTimeout(()=>{void db().meta.put({key:"survey.activeDraft",value:{userId:user.id,parcelleId,savedAt:Date.now(),started,points,trace,unit,autoMark100,bestAcc,accSamples,acceptedCount,rejectedCount,qaHistory,pauses,calibration,gpsConfig}}).catch(e=>console.warn("[survey] sauvegarde locale différée",e));},800);return()=>clearTimeout(timer);},[draftReady,started,user?.id,parcelleId,points,trace,unit,autoMark100,bestAcc,accSamples,acceptedCount,rejectedCount,qaHistory,pauses,calibration,gpsConfig]);
+  useEffect(()=>{const refresh=()=>{setNetworkOnline(navigator.onLine);void outboxCount().then(setQueuedChanges).catch(()=>{});};refresh();window.addEventListener("online",refresh);window.addEventListener("offline",refresh);const timer=setInterval(refresh,5000);return()=>{window.removeEventListener("online",refresh);window.removeEventListener("offline",refresh);clearInterval(timer);};},[]);
   useEffect(() => {
     if (!running) return;
     setError(null);
@@ -165,34 +173,23 @@ function MeasurePage() {
       // déplacement dépasse largement l'incertitude GPS — seuil issu de la
       // calibration réelle de l'appareil quand elle est disponible.
       const calibratedMin = calibration?.recommendedMinMoveM ?? 8;
-      const minMove = Math.max(calibratedMin, raw.accuracy * 2, filtered.accuracy * 2.5);
+      const minMove = Math.max(2,Math.min(calibratedMin,8),Math.min(raw.accuracy*0.5,6),Math.min(filtered.accuracy,5));
       if (haversine(stable, filtered) < minMove) {
         setDistanceFromLast(0);
         return;
       }
 
+      const segmentMeters = haversine(stable, filtered);
+      walkedMetersRef.current += segmentMeters;
+      setDistanceFromLast(segmentMeters);
       stablePosRef.current = filtered;
       setFilteredCur(filtered);
       setTrace((tr) => [...tr, filtered]);
       setPoints((pts) => {
         if (pts.length === 0) return pts;
-        const last = pts[pts.length - 1];
-        const d = haversine(last, filtered);
-        setDistanceFromLast(d);
-        if (autoMark100 && d >= cfg.autoMarkEveryMeters &&
-            (!lastAutoRef.current || haversine(lastAutoRef.current, filtered) >= cfg.autoMarkEveryMeters)) {
-          lastAutoRef.current = filtered;
-          feedbackMark();
-          notify("Point auto-marqué", `Point ${pts.length + 1} enregistré à 100 m du précédent.`, { tag: "auto-mark" });
-          const next: MeasurementPoint = {
-            index: pts.length + 1, samples: 1, auto: true,
-            lat: filtered.lat, lng: filtered.lng, accuracy: filtered.accuracy, ts: Date.now(),
-          };
-          return [...pts, next];
-        }
-        return pts;
+        if(!autoMark100)return pts;const additions:MeasurementPoint[]=[];const previousDistance=walkedMetersRef.current-segmentMeters;const markEvery=Math.max(1,cfg.autoMarkEveryMeters||100);while(walkedMetersRef.current+0.01>=nextAutoMarkAtRef.current){const fraction=Math.max(0,Math.min(1,(nextAutoMarkAtRef.current-previousDistance)/Math.max(segmentMeters,0.001)));additions.push({index:pts.length+additions.length+1,samples:1,auto:true,lat:stable.lat+(filtered.lat-stable.lat)*fraction,lng:stable.lng+(filtered.lng-stable.lng)*fraction,accuracy:Math.max(stable.accuracy,filtered.accuracy),ts:Math.round(stable.ts+(filtered.ts-stable.ts)*fraction)});nextAutoMarkAtRef.current+=markEvery;}if(additions.length){const last=additions[additions.length-1];lastAutoRef.current={lat:last.lat,lng:last.lng,accuracy:last.accuracy,ts:last.ts};feedbackMark();notify("Point automatique",String(additions.length)+" point(s) ajouté(s) sur le parcours.",{tag:"auto-mark"});}return additions.length?[...pts,...additions]:pts;
       });
-    }, cfgRef.current);
+    },cfgRef.current,(message)=>{setError(message);});
     watchRef.current = handle;
     return () => { handle.stop(); watchRef.current = null; };
   }, [running, autoMark100, calibration]);
@@ -290,12 +287,14 @@ function MeasurePage() {
       lat: src.lat,
       lng: src.lng,
       accuracy: src.accuracy,
-      ts: Date.now(),
+      ts: src.ts,
     };
     if (isStart) {
       // MARQUER LE DÉPART — c'est ce clic qui démarre réellement la levée.
       stablePosRef.current = { lat: src.lat, lng: src.lng, accuracy: src.accuracy, ts: p.ts };
       setTrace([{ lat: src.lat, lng: src.lng, accuracy: src.accuracy, ts: p.ts }]);
+      walkedMetersRef.current = 0;
+      nextAutoMarkAtRef.current = gpsConfig.autoMarkEveryMeters;
       setPoints([p]);
       setStarted(true);
       notify("Levée démarrée", "Point de départ enregistré. Marchez autour de la parcelle.", { tag: "start" });
@@ -307,8 +306,26 @@ function MeasurePage() {
   }
 
   function undo() {
-    setPoints((s) => s.slice(0, -1));
-    lastAutoRef.current = null;
+    if (!points.length) return;
+    const remaining = points.slice(0, -1);
+    setPoints(remaining);
+    const last = remaining[remaining.length - 1];
+    if (!last) {
+      setTrace([]); setStarted(false); startedRef.current = false;
+      stablePosRef.current = null; lastAutoRef.current = null;
+      walkedMetersRef.current = 0; nextAutoMarkAtRef.current = gpsConfig.autoMarkEveryMeters;
+      return;
+    }
+    let lastIndex = -1;
+    for (let i = 0; i < trace.length; i++) {
+      const p = trace[i];
+      if (p.ts <= last.ts || (Math.abs(p.lat - last.lat) < 1e-7 && Math.abs(p.lng - last.lng) < 1e-7)) lastIndex = i;
+    }
+    setTrace(lastIndex >= 0 ? trace.slice(0, lastIndex + 1) : trace);
+    stablePosRef.current = { lat: last.lat, lng: last.lng, accuracy: last.accuracy, ts: last.ts };
+    lastAutoRef.current = { lat: last.lat, lng: last.lng, accuracy: last.accuracy, ts: last.ts };
+    walkedMetersRef.current = remaining.reduce((sum, p, i) => i ? sum + haversine(remaining[i - 1], p) : 0, 0);
+    nextAutoMarkAtRef.current = (Math.floor(walkedMetersRef.current / gpsConfig.autoMarkEveryMeters) + 1) * gpsConfig.autoMarkEveryMeters;
   }
 
   /** Ouvre le contrôle terrain : rien n'est enregistré avant sa réussite. */
@@ -358,10 +375,11 @@ function MeasurePage() {
       calibration,
       acceptedSamples: acceptedCount,
     });
-    if (!check.ok && !force) {
+    if (!check.ok && (submit || !force)) {
       setFieldCheck(check);
-      setCheckOpen(true);
+      setCheckOpen(false);
       feedbackError();
+      setError(`Levée non validée : ${check.issues.slice(0, 2).join(" · ") || "vérifiez la fermeture et la qualité GPS"}`);
       return;
     }
     const points_ = finalPoints;
@@ -411,9 +429,7 @@ function MeasurePage() {
         },
       },
     };
-    await db().measurements.put(m);
-    // Synchronisation cloud immédiate (ou mise en file d'attente hors ligne)
-    void syncEntity("measurements", m.id).catch(() => {});
+    m.offlineCreated=!navigator.onLine;m.syncState="pending";await db().measurements.put(m);await db().meta.delete("survey.activeDraft").catch(()=>{});void syncEntity("measurements",m.id).catch(()=>{});
     feedbackSuccess();
     setCheckOpen(false);
     if (submit) await notify("Mesure soumise", `Levé envoyé (${formatArea(m.areaM2, m.unit)}).`, { tag: "submit" });
@@ -605,6 +621,7 @@ function MeasurePage() {
 
       {/* DOCK BAS — actions principales */}
       <div className="absolute left-2 right-2 z-[1200] space-y-2 bottom-[calc(env(safe-area-inset-bottom)+0.5rem)]">
+        {(!networkOnline||queuedChanges>0)&&<div role="status" className="mx-auto w-fit max-w-full rounded-full bg-card/95 px-3 py-1.5 text-[11px] font-semibold shadow-elevated border">{networkOnline?"Réseau disponible":"Hors ligne — levé conservé sur cet appareil"}{queuedChanges>0?" · "+queuedChanges+" changement(s) en attente":""}</div>}
         {error && (
           <div className="px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs text-center shadow-elevated">
             {error}
@@ -655,7 +672,7 @@ function MeasurePage() {
               if (!started) return;
               const n = points.length;
               if (!confirm(`Terminer et sauvegarder la levée ?\n${n} point(s) · ${n >= 3 ? formatArea(area, unit) : "surface calculée à la fermeture"}\nLe polygone sera automatiquement refermé sur le point de départ.`)) return;
-              save(true, true);
+              save(true, false);
             }}
             disabled={!started}
             className="flex-1 min-w-[9rem] h-11 rounded-xl bg-destructive text-destructive-foreground font-bold text-xs shadow-elevated disabled:opacity-40 flex items-center justify-center gap-1.5"

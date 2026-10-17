@@ -201,15 +201,18 @@ export function MapView(props: Props) {
       lr.lotLayers.push(lbl);
     }
 
-    // auto-fit
-    const all: [number, number][] = [];
-    peri.forEach((p) => all.push([p.lat, p.lng]));
-    (props.trace ?? []).forEach((p) => all.push([p.lat, p.lng]));
-    (props.lots ?? []).forEach((l) => l.polygon.forEach((p) => all.push([p.lat, p.lng])));
-    if (all.length >= 2) {
-      try { map.fitBounds(all as any, { padding: [30, 30], maxZoom: 19 }); } catch {}
-    } else if (props.current) {
-      map.setView([props.current.lat, props.current.lng], Math.max(map.getZoom(), 17));
+    // Keep the user's viewport stable while the GPS trace grows.
+    const mapState = map as LMap & { __acremapInitialFitDone?: boolean };
+    if (!mapState.__acremapInitialFitDone) {
+      const all: [number, number][] = [];
+      peri.forEach((p) => all.push([p.lat, p.lng]));
+      (props.trace ?? []).forEach((p) => all.push([p.lat, p.lng]));
+      (props.lots ?? []).forEach((l) => l.polygon.forEach((p) => all.push([p.lat, p.lng])));
+      if (all.length >= 2) {
+        try { map.fitBounds(all as any, { padding: [30, 30], maxZoom: 19 }); mapState.__acremapInitialFitDone = true; } catch {}
+      } else if (props.current && !peri.length) {
+        map.setView([props.current.lat, props.current.lng], Math.max(map.getZoom(), 17));
+      }
     }
   }
 

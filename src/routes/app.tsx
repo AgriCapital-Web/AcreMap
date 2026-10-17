@@ -44,22 +44,6 @@ function AppLayout() {
     }
   }, [hydrated, user, nav, path]);
 
-  // Enregistrement du service worker sur le domaine officiel uniquement.
-  useEffect(() => {
-    if (!("serviceWorker" in navigator)) return;
-    navigator.serviceWorker.register("/sw.js").then((reg) => {
-      reg.update().catch(() => {});
-      const iv = setInterval(() => reg.update().catch(() => {}), 60_000);
-      let reloading = false;
-      navigator.serviceWorker.addEventListener("controllerchange", () => {
-        if (reloading) return;
-        reloading = true;
-        clearInterval(iv);
-        window.location.reload();
-      });
-    }).catch(() => {});
-  }, []);
-
   useEffect(() => {
     setNotifPerm(notificationPermission());
     initSync();

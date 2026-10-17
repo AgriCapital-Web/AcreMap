@@ -238,3 +238,41 @@ Après migration et configuration :
 ## Durcissement RLS des plans
 
 Le correctif `20261017040000_acremap_morcellement_rls_hardening` retire l'ancienne politique qui autorisait tout utilisateur authentifié à modifier tous les plans. Les plans sont désormais limités à leur créateur, avec accès global conservé pour les rôles `admin`, `pdg` et `dg`. Les données existantes ne sont pas supprimées. Les plans historiques sans créateur restent accessibles aux administrateurs globaux.
+
+## Migration complémentaire — qualité et synchronisation des levés GPS
+
+Fichier : `supabase/migrations/20261017120000_acremap_survey_quality.sql`. Migration additive, réexécutable et reliée à `public.measurements`. Elle conserve les champs GPS/QA existants et ajoute les métadonnées de création hors ligne et de synchronisation. Elle ne supprime ni ne réécrit les levés existants. À exécuter dans le projet Supabase AcreMap, jamais dans le projet CRM.
+
+```sql
+-- AcreMap: additive survey sync metadata; keeps existing measurement and QA rows intact.
+begin;
+do $migration$
+begin
+ if to_regclass('public.measurements') is null then raise exception 'Table public.measurements is missing. Apply the base AcreMap schema first.'; end if;
+end
+$migration$;
+alter table public.measurements
+ add column if not exists offline_created boolean not null default false,
+ add column if not exists sync_state text not null default 'synced',
+ add column if not exists synced_at timestamptz,
+ add column if not exists measured_at timestamptz;
+do $constraint$
+begin
+ if not exists(select 1 from pg_constraint where conname='measurements_sync_state_check' and conrelid='public.measurements'::regclass) then
+  alter table public.measurements add constraint measurements_sync_state_check check(sync_state in ('pending','synced','error')) not valid;
+ end if;
+end
+$constraint$;
+create index if not exists measurements_sync_state_idx on public.measurements(sync_state,created_at desc);
+create index if not exists measurements_measured_at_idx on public.measurements(measured_at desc);
+commit;
+```
+
+## Mode hors ligne terrain et réseau faible
+
+- Le service worker est enregistré depuis la racine, y compris depuis la connexion, et précharge les routes principales. Les ressources et tuiles déjà consultées/téléchargées sont conservées localement.
+- Le levé actif et ses indicateurs GPS sont enregistrés automatiquement dans IndexedDB et peuvent être repris après rechargement sur le même appareil et le même compte.
+- Les opérations cloud passent par une file durable, des requêtes avec délai maximal, des réessais à temporisation exponentielle et des déclencheurs de reconnexion, de retour au premier plan et de changement de réseau.
+- La persistance locale est demandée au navigateur mais ne peut être garantie contre une suppression système. La précision dépend du téléphone et de l'environnement; aucune application web ne peut promettre une détection GPS parfaite.
+- Le fond de carte n'est disponible hors ligne que pour les tuiles téléchargées avant la coupure. Pour la meilleure continuité GPS, garder le levé ouvert.
+- La synchronisation se relance automatiquement lorsque la page/PWA est active. Quand l'application est totalement fermée, la garantie dépend des capacités du navigateur et de l'accès à une session valide côté service worker.

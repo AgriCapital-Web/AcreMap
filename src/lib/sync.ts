@@ -49,6 +49,10 @@ function mapMeasurement(row: Measurement, userId: string | null) {
     points: row.points as unknown, trace: row.trace as unknown,
     device_profile: (row.deviceProfile ?? null) as unknown,
     qa: (row.qa ?? null) as unknown,
+    offline_created: row.offlineCreated ?? false,
+    sync_state: row.syncState ?? "pending",
+    synced_at: toIso(row.syncedAt),
+    measured_at: toIso(row.createdAt),
     notes: row.notes ?? null,
     validated_by: row.validatedBy ?? null, validated_at: toIso(row.validatedAt),
     created_by: userId, created_at: toIso(row.createdAt) ?? new Date().toISOString(),
@@ -81,19 +85,26 @@ function mapPlan(row: MorcPlan, userId: string | null) {
   };
 }
 
-async function pushUpsert(table: TableName, payload: Record<string, unknown>): Promise<void> {
-  const { error } = await supabase.from(table).upsert(payload as never, { onConflict: "id" });
-  if (error) throw error;
+async function withNetworkTimeout<T>(promise:PromiseLike<T>,ms=60_000):Promise<T>{let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([Promise.resolve(promise),new Promise<T>((_,reject)=>{timer=setTimeout(()=>reject(new Error("Réseau trop lent : opération conservée pour réessai.")),ms);})]);}finally{if(timer)clearTimeout(timer);}}
+async function pushUpsert(table:TableName,payload:Record<string,unknown>):Promise<void>{
+ const result=await withNetworkTimeout(supabase.from(table).upsert(payload as never,{onConflict:"id"}));
+ if(!result.error)return;
+ const msg=result.error.message??"";
+ const metadataColumns=["offline_created","sync_state","synced_at","measured_at"];
+ if(table==="measurements"&&metadataColumns.some(column=>msg.includes(column))&&(msg.toLowerCase().includes("column")||msg.toLowerCase().includes("schema cache"))){
+  const compatible={...payload};for(const column of metadataColumns)delete compatible[column];
+  const retry=await withNetworkTimeout(supabase.from(table).upsert(compatible as never,{onConflict:"id"}));
+  if(retry.error)throw retry.error;
+  return;
+ }
+ throw result.error;
 }
-async function pushDelete(table: TableName, id: string): Promise<void> {
-  const { error } = await supabase.from(table).delete().eq("id", id);
-  if (error) throw error;
-}
+async function pushDelete(table:TableName,id:string):Promise<void>{const {error}=await withNetworkTimeout(supabase.from(table).delete().eq("id",id));if(error)throw error;}
 
 async function fetchAllRows(table: TableName): Promise<any[]> {
   const all: any[] = [];
   for (let offset = 0; ; offset += 1000) {
-    const { data, error } = await (supabase.from(table) as any).select("*").order("id", { ascending: true }).range(offset, offset + 999);
+    const { data, error } = await withNetworkTimeout((supabase.from(table) as any).select("*").order("id", { ascending: true }).range(offset, offset + 999));
     if (error) throw error;
     const page = (data ?? []) as any[];
     all.push(...page);
@@ -101,12 +112,7 @@ async function fetchAllRows(table: TableName): Promise<any[]> {
   }
   return all;
 }
-async function currentUserId(): Promise<string | null> {
-  try {
-    const { data } = await supabase.auth.getUser();
-    return data.user?.id ?? null;
-  } catch { return null; }
-}
+async function currentUserId():Promise<string|null>{try{const {data}=await supabase.auth.getSession();return data.session?.user?.id??null;}catch{return null;}}
 
 // ---- Outbox helpers ----
 export async function enqueue(table: TableName, op: "upsert" | "delete", id: string, payload?: unknown) {
@@ -121,18 +127,17 @@ export async function outboxCount(): Promise<number> {
 
 export async function flushOutbox(onProgress?: (done: number, total: number) => void): Promise<{ ok: number; failed: number }> {
   if (!isBrowser() || !navigator.onLine) return { ok: 0, failed: 0 };
-  const items = await db().outbox.toArray();
-  let ok = 0, failed = 0;
-  for (let i = 0; i < items.length; i++) {
-    const it = items[i];
+  const now=Date.now();const allItems=await db().outbox.orderBy("ts").toArray();const items=allItems.filter(it=>now-(it.ts??0)>=Math.min(15*60_000,it.attempts?5_000*(2**Math.min(it.attempts-1,8)):0));
+  let ok=0,failed=0;
+  for(let i=0;i<items.length;i++){if(!navigator.onLine){failed+=items.length-i;break;}const it=items[i];
     try {
-      if (it.op === "upsert") await pushUpsert(it.table, it.payload as Record<string, unknown>);
-      else await pushDelete(it.table, it.id);
-      await db().outbox.delete([it.table, it.id] as never);
+      if(it.op==="upsert"){const payload={...(it.payload as Record<string,unknown>)};if(it.table==="measurements"){payload.sync_state="synced";payload.synced_at=new Date().toISOString();}await pushUpsert(it.table,payload);if(it.table==="measurements")await db().measurements.update(it.id,{syncState:"synced",syncedAt:Date.now()});}else await pushDelete(it.table,it.id);
+      await db().outbox.delete([it.table,it.id] as never);
       ok++;
     } catch (e) {
       failed++;
       await db().outbox.update([it.table, it.id] as never, {
+        ts: Date.now(),
         attempts: (it.attempts ?? 0) + 1,
         lastError: (e as Error).message ?? String(e),
       });
@@ -198,13 +203,7 @@ export async function syncEntity(table: TableName, id: string): Promise<void> {
   // Écrire d'abord dans la file durable : un changement de page ou une fermeture
   // immédiate ne peut plus interrompre l'envoi avant sa mise en attente.
   await enqueue(table, "upsert", id, payload);
-  if (navigator.onLine) {
-    try {
-      await pushUpsert(table, payload);
-      await local.outbox.delete([table, id] as never);
-      return;
-    } catch (e) { throw e; }
-  }
+  if(navigator.onLine){try{const outgoing={...payload};if(table==="measurements"){outgoing.sync_state="synced";outgoing.synced_at=new Date().toISOString();}await pushUpsert(table,outgoing);if(table==="measurements")await local.measurements.update(id,{syncState:"synced",syncedAt:Date.now()});await local.outbox.delete([table,id] as never);return;}catch(e){throw e;}}
 }
 
 // ---- Full migration from local IndexedDB to Supabase ----
@@ -337,6 +336,9 @@ export async function pullFromCloud(): Promise<PullResult> {
       unit: (r.unit ?? "ha") as Measurement["unit"],
       deviceProfile: (r.device_profile ?? undefined) as Measurement["deviceProfile"],
       qa: (r.qa ?? undefined) as Measurement["qa"],
+      offlineCreated: Boolean(r.offline_created),
+      syncState: (r.sync_state ?? "synced") as Measurement["syncState"],
+      syncedAt: r.synced_at ? ts(r.synced_at) : undefined,
       notes: r.notes ?? undefined,
     }));
     await reconcile("measurements", await local.measurements.toArray(), rows, (ids) => local.measurements.bulkDelete(ids), (items) => local.measurements.bulkPut(items));
@@ -434,22 +436,10 @@ export async function ensureInitialMigration(): Promise<void> {
 }
 
 // ---- Auto-flush : reconnexion, retour au premier plan, périodique ----
-let _initialized = false;
-let _running = false;
-export function initSync() {
-  if (!isBrowser() || _initialized) return;
-  _initialized = true;
-  const run = () => {
-    if (_running || !navigator.onLine) return;
-    _running = true;
-    void syncAll().finally(() => { _running = false; });
-  };
-  window.addEventListener("online", run);
-  window.addEventListener("focus", run);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) run(); });
-  setInterval(run, 120_000);
-  if (navigator.onLine) {
-    setTimeout(() => { void ensureInitialMigration().finally(run); }, 1500);
-  }
+let _initialized=false,_running=false;let _retryTimer:ReturnType<typeof setTimeout>|undefined;
+export function initSync(){if(!isBrowser()||_initialized)return;_initialized=true;
+ const scheduleRetry=(delay=15_000)=>{if(_retryTimer)clearTimeout(_retryTimer);_retryTimer=setTimeout(run,delay);};
+ const run=()=>{if(_running||!navigator.onLine)return;_running=true;void syncAll().then(result=>{if(result.failed>0)scheduleRetry();else if(result.pulled===0&&result.flushed===0)scheduleRetry(60_000);}).catch(e=>{console.warn("[sync] opérations conservées en attente",e);scheduleRetry();}).finally(()=>{_running=false;});};
+ window.addEventListener("online",()=>{if(_retryTimer)clearTimeout(_retryTimer);run();});window.addEventListener("offline",()=>{if(_retryTimer)clearTimeout(_retryTimer);});window.addEventListener("focus",run);document.addEventListener("visibilitychange",()=>{if(!document.hidden)run();});(navigator as Navigator&{connection?:EventTarget}).connection?.addEventListener("change",run);setInterval(run,30_000);if(navigator.onLine)setTimeout(()=>{void ensureInitialMigration().catch(()=>{}).finally(run);},1500);
 }
 

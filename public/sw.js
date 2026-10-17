@@ -1,17 +1,15 @@
 // AcreMap Service Worker — hors ligne complet (app shell + assets + tuiles) + notifications
-const CACHE = "acremap-v6";
-const TILE_CACHE = "acremap-tiles-v1";
-const SHELL = ["/", "/login", "/app", "/manifest.webmanifest", "/favicon.png", "/icon-192.png", "/icon-512.png"];
+const CACHE="acremap-v7";const TILE_CACHE="acremap-tiles-v1";const SHELL=["/","/login","/app","/app/measure","/app/parcelles","/app/morcellement","/app/releves","/app/validation","/app/parametres","/manifest.webmanifest","/favicon.png","/icon-192.png","/icon-512.png"];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => Promise.allSettled(SHELL.map((u) => c.add(u)))).catch(() => {}));
+  e.waitUntil((async()=>{const c=await caches.open(CACHE);await Promise.allSettled(SHELL.map(async u=>{try{const r=await fetch(u,{cache:"reload"});if(r.ok&&r.status===200)await c.put(u,r);}catch{}}));})());
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE && k !== TILE_CACHE).map((k) => caches.delete(k)))
+      Promise.all(keys.filter(k=>k.startsWith("acremap-")&&k!==CACHE&&k!==TILE_CACHE).map(k=>caches.delete(k)))
     )
   );
   self.clients.claim();
@@ -59,13 +57,12 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       (async () => {
         try {
-          const res = await fetch(req);
-          const c = await caches.open(CACHE);
-          c.put(req, res.clone()).catch(() => {});
+          const res=await fetch(req);
+          if(res.ok&&res.status===200&&(res.headers.get("content-type")||"").includes("text/html")){const c=await caches.open(CACHE);c.put(req,res.clone()).catch(()=>{});}
           return res;
         } catch {
-          const c = await caches.open(CACHE);
-          return (await c.match(req)) || (await c.match("/app")) || (await c.match("/")) || Response.error();
+          const c=await caches.open(CACHE);
+          return (await c.match(req,{ignoreSearch:true}))||(await c.match(new URL(req.url).pathname))||(await c.match("/app"))||(await c.match("/app/measure"))||(await c.match("/"))||new Response("AcreMap est hors ligne. Ouvrez l’application une fois avec le réseau pour mettre à jour les écrans.",{status:503,headers:{"Content-Type":"text/plain; charset=utf-8"}});
         }
       })()
     );
@@ -113,16 +110,7 @@ self.addEventListener("message", (event) => {
   if (data.type === "prefetch-tiles" && Array.isArray(data.urls)) {
     event.waitUntil(
       caches.open(TILE_CACHE).then(async (cache) => {
-        let done = 0;
-        for (const u of data.urls.slice(0, 4000)) {
-          try {
-            if (!(await cache.match(u))) {
-              const res = await fetch(u, { mode: "no-cors" });
-              if (res) await cache.put(u, res.clone());
-            }
-            done++;
-          } catch { /* réseau indisponible → on continue */ }
-        }
+        let done=0;const urls=data.urls.slice(0,4000);let cursor=0;const worker=async()=>{while(cursor<urls.length){const u=urls[cursor++];try{if(!(await cache.match(u))){const r=await fetch(u,{mode:"no-cors"});if(r&&(r.ok||r.type==="opaque"))await cache.put(u,r.clone());}done++;}catch{}}};await Promise.all(Array.from({length:3},()=>worker()));
         const clients = await self.clients.matchAll({ includeUncontrolled: true });
         clients.forEach((c) => c.postMessage({ type: "prefetch-tiles-done", done, total: data.urls.length }));
       })
