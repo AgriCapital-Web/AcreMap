@@ -109,19 +109,21 @@ function sliceByAreaAdaptive(poly: AnyPoly, targetM2: number): { cut: AnyPoly | 
   // Tester plusieurs orientations réellement présentes dans la géométrie, ainsi
   // que quelques angles de secours. Aucun axe n'est privilégié pour tous les lots.
   const angles: number[] = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
-  for (const ring of rings) {
-    for (let i = 0; i < ring.length - 1; i++) {
-      const a = ring[i], b = ring[i + 1];
-      const dx = b[0] - a[0], dy = b[1] - a[1];
-      if (Math.hypot(dx, dy) < 0.5) continue;
-      let angle = Math.atan2(dy, dx) + Math.PI / 2;
-      while (angle < 0) angle += Math.PI;
-      while (angle >= Math.PI) angle -= Math.PI;
-      if (!angles.some((existing) => {
-        const delta = Math.abs(existing - angle);
-        return Math.min(delta, Math.PI - delta) < Math.PI / 36;
-      })) angles.push(angle);
-    }
+  // GPS surveys can contain hundreds of vertices: use the strongest boundary
+  // directions only, keeping the search bounded and responsive on mobile.
+  const edges = rings.flatMap((ring) => ring.slice(0, -1).map((a, i) => {
+    const b = ring[i + 1];
+    return { dx: b[0] - a[0], dy: b[1] - a[1], length: Math.hypot(b[0] - a[0], b[1] - a[1]) };
+  })).filter((edge) => edge.length >= 0.5).sort((a, b) => b.length - a.length);
+  for (const edge of edges) {
+    if (angles.length >= 16) break;
+    let angle = Math.atan2(edge.dy, edge.dx) + Math.PI / 2;
+    while (angle < 0) angle += Math.PI;
+    while (angle >= Math.PI) angle -= Math.PI;
+    if (!angles.some((existing) => {
+      const delta = Math.abs(existing - angle);
+      return Math.min(delta, Math.PI - delta) < Math.PI / 36;
+    })) angles.push(angle);
   }
 
   const [minX, minY, maxX, maxY] = turf.bbox(poly);
@@ -135,7 +137,6 @@ function sliceByAreaAdaptive(poly: AnyPoly, targetM2: number): { cut: AnyPoly | 
     let hi = Math.max(...projections) + 0.01;
     let bestCut: AnyPoly | null = null;
     let bestArea = 0;
-    let bestThreshold = (lo + hi) / 2;
 
     // Bisection on this orientation, measuring the largest connected piece,
     // not the sum of disconnected slivers on opposite sides of a concavity.
@@ -154,7 +155,6 @@ function sliceByAreaAdaptive(poly: AnyPoly, targetM2: number): { cut: AnyPoly | 
       if (largest && Math.abs(area - targetM2) < Math.abs(bestArea - targetM2)) {
         bestCut = featureOf(largest);
         bestArea = area;
-        bestThreshold = mid;
       }
       if (area > targetM2) hi = mid; else lo = mid;
       if (Math.abs(area - targetM2) <= Math.max(0.5, targetM2 * 1e-6)) break;
@@ -176,7 +176,6 @@ function sliceByAreaAdaptive(poly: AnyPoly, targetM2: number): { cut: AnyPoly | 
       if (!rest) continue;
       winner = { cut: bestCut, rest, area: bestArea, score };
     }
-    void bestThreshold;
   }
 
   if (!winner) return { cut: null, rest: poly, area: 0 };
