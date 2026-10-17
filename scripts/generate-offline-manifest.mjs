@@ -1,7 +1,14 @@
-import { readdir, writeFile } from "node:fs/promises";
+import { readdir, writeFile, access } from "node:fs/promises";
 import { join, relative, extname, sep } from "node:path";
 
-const root = join(process.cwd(), ".output", "public");
+const candidates = [
+  join(process.cwd(), ".vercel", "output", "static"),
+  join(process.cwd(), ".output", "public"),
+];
+let root = candidates[0];
+for (const candidate of candidates) {
+  try { await access(candidate); root = candidate; break; } catch {}
+}
 const extensions = new Set([".js", ".mjs", ".css", ".woff", ".woff2", ".ttf", ".otf", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".ico", ".json", ".webmanifest"]);
 const files = [];
 async function walk(dir) {
@@ -19,4 +26,4 @@ async function walk(dir) {
 await walk(root);
 files.sort();
 await writeFile(join(root, "offline-assets.json"), JSON.stringify(files));
-console.log(`[offline] ${files.length} client assets listed for persistent offline cache`);
+console.log(`[offline] ${files.length} client assets listed from ${root} for persistent offline cache`);
