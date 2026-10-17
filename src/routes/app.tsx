@@ -84,7 +84,7 @@ function AppLayout() {
         <button aria-label="Fermer le menu" className="fixed inset-0 z-40 bg-black/45 lg:hidden"
           onClick={() => setMenuOpen(false)} />
       )}
-      <aside className={`${isMeasureRoute ? "hidden" : menuOpen ? "fixed inset-y-0 left-0 z-50 flex w-72 shadow-2xl" : "hidden"} lg:static lg:z-auto lg:flex lg:w-64 lg:shadow-none flex-col bg-sidebar text-sidebar-foreground`}>
+      <aside className={`${isMeasureRoute ? "hidden" : menuOpen ? "fixed inset-y-0 left-0 z-50 flex w-[min(18rem,85vw)] shadow-2xl" : "hidden"} min-h-0 flex-col bg-sidebar text-sidebar-foreground lg:sticky lg:top-0 lg:flex lg:h-screen lg:min-h-screen lg:w-64 lg:shrink-0 lg:shadow-none`}>
         <div className="p-4 border-b border-sidebar-border flex items-center justify-between gap-2">
           <Logo className="h-9 w-9 min-w-0" showText />
           <button type="button" aria-label="Fermer le menu" onClick={() => setMenuOpen(false)} className="lg:hidden rounded-md p-2 hover:bg-sidebar-accent"><Icon name="close" /></button>
@@ -166,6 +166,7 @@ function Icon({ name }: { name: string }) {
   switch (name) {
     case "close": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>;
     case "menu": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
+    case "close": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="m6 6 12 12M18 6 6 18" /></svg>;
     case "settings": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19 13.5a7.2 7.2 0 0 0 0-3l2-1.5-2-3.5-2.4 1a7.2 7.2 0 0 0-2.6-1.5L13.5 2h-4L9 5a7.2 7.2 0 0 0-2.6 1.5l-2.4-1-2 3.5 2 1.5a7.2 7.2 0 0 0 0 3l-2 1.5 2 3.5 2.4-1A7.2 7.2 0 0 0 9 19l.5 3h4l.5-3a7.2 7.2 0 0 0 2.6-1.5l2.4 1 2-3.5z" transform="translate(0 0) scale(.9) translate(1.3 1.3)" /></svg>;
     case "home": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><path d="M3 12L12 4l9 8" /><path d="M5 10v10h14V10" /></svg>;
     case "crosshair": return <svg className={common} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 3v4M12 17v4M3 12h4M17 12h4" /><circle cx="12" cy="12" r="2" fill={stroke} /></svg>;
