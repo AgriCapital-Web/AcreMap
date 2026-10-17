@@ -87,3 +87,15 @@ Les secrets doivent être identiques des deux côtés. Ne jamais inscrire leurs 
 5. Le CRM conserve le plan et les lots, puis met à jour les superficies et parts du propriétaire.
 
 La base CRM doit avoir sa migration propre appliquée et les Edge Functions `acremap-settings`, `acremap-sync` et `acremap-webhook` déployées avant le test de bout en bout.
+
+
+## 6. Paramètres AcreMap et génération des secrets
+
+Une page réservée à l’administrateur est disponible à `/app/parametres` (menu latéral → Paramètres & intégrations). Elle affiche uniquement l’état présent/absent des variables serveur et génère localement une clé API et un secret HMAC à copier immédiatement. Les valeurs générées ne sont pas conservées dans la base ni dans le navigateur après rechargement.
+
+- `ACREMAP_CRM_API_KEY` : même valeur dans Vercel/AcreMap et dans CRM → Paramètres → AcreMap API → Clé API AcreMap.
+- `CRM_WEBHOOK_SECRET` : même valeur dans Vercel/AcreMap et dans CRM → Paramètres → AcreMap API → Secret HMAC webhook.
+- `CRM_WEBHOOK_URL` : `https://rfzfsmpsuempafhkqhra.supabase.co/functions/v1/acremap-webhook`.
+- `SUPABASE_SERVICE_ROLE_KEY` : clé secrète du projet Supabase AcreMap, à configurer uniquement côté serveur Vercel. Ne jamais la publier ni la préfixer par `VITE_`.
+
+La connexion Supabase de l’environnement d’administration actuel ne donne pas accès au projet AcreMap `ckkjqpsoavrikgiuuktf`. La migration AcreMap est donc versionnée dans `supabase/migrations/20261017010000_acremap_crm_integration.sql`, mais doit encore être appliquée au projet AcreMap par un administrateur disposant des droits sur ce projet. La migration CRM est séparée et ne doit pas être rejouée si elle est déjà appliquée.
