@@ -399,7 +399,11 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
       // Les morceaux détachés par un découpage concave rejoignent les résiduels.
       pieces.slice(1).forEach((p) => residuels.push(p));
       rem = rest;
-      if (Math.abs(area - cibleM2) > cibleM2 * 0.5) break;
+      const previousArea = remArea;
+      rem = rest;
+      // Recalculer les orientations sur le reliquat : ne pas abandonner
+      // toute la parcelle après un seul découpage difficile.
+      if (!rest || area <= 0 || areaOf(rest) >= previousArea - 0.5) break;
     }
     splitPieces(rem).forEach((p) => residuels.push(p));
   }
