@@ -301,6 +301,7 @@ function MorcellementPage() {
   const exportVoies = useMemo(() => (plan?.voies ?? []).map((v) => v.geo ?? []).filter((p) => p.length >= 3), [plan]);
   const exportPdf = (kind: "global" | "entreprise" | "client") => {
     if (!plan || !parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant l'export."); return; }
+    if (!plan.conforme) { notify("Export bloqué : le morcellement n’est pas conforme. Corrigez les lots hors tolérance et le bilan surfacique avant de produire un plan officiel."); return; }
     const focusCode = selected ?? lots[0]?.code;
     if (kind === "client" && !focusCode) { notify("Aucun lot disponible pour le plan client."); return; }
     try {
@@ -314,6 +315,7 @@ function MorcellementPage() {
   };
   const exportTable = () => {
     if (!plan) { notify("Générez d'abord un plan."); return; }
+    if (!plan.conforme) { notify("Export CSV bloqué : le morcellement n’est pas conforme."); return; }
     const rows = [["Code","Type","Part","Superficie cible (m²)","Superficie mesurée (m²)","Écart (m²)","Attributaire","Contact","Compte"],
       ...plan.lots.map((l) => [l.code,l.kind,l.part,l.cibleM2,l.reelM2,l.reelM2-l.cibleM2,assigned[l.code]?.nom ?? "",assigned[l.code]?.contact ?? "",assigned[l.code]?.compte ?? ""])];
     const csv = rows.map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g,'""')}"`).join(";")).join("\r\n");
@@ -321,18 +323,22 @@ function MorcellementPage() {
   };
   const exportGeo = () => {
     if (!plan || !parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant l'export."); return; }
+    if (!plan.conforme) { notify("Export GeoJSON bloqué : le morcellement n’est pas conforme."); return; }
     downloadBlob(JSON.stringify(toGeoJSON(parcelle, releve, exportLots()), null, 2), `${reference}.geojson`, "application/geo+json"); notify("GeoJSON généré et téléchargé.");
   };
   const exportKml = () => {
     if (!plan || !parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant l'export."); return; }
+    if (!plan.conforme) { notify("Export KML bloqué : le morcellement n’est pas conforme."); return; }
     downloadBlob(toKML(parcelle, releve, exportLots()), `${reference}.kml`, "application/vnd.google-earth.kml+xml"); notify("KML généré et téléchargé.");
   };
   const exportDxf = () => {
     if (!plan || !parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant l'export."); return; }
+    if (!plan.conforme) { notify("Export DXF bloqué : le morcellement n’est pas conforme."); return; }
     downloadBlob(buildDxf({ measurement: releve, parcelle, lots: exportLots(), voie: exportVoies }), `${reference}.dxf`, "application/dxf"); notify("DXF généré et téléchargé.");
   };
   const exportShapefile = async () => {
     if (!plan || !parcelle || !releve) { notify("Choisissez une parcelle et un relevé avant l'export."); return; }
+    if (!plan.conforme) { notify("Export Shapefile bloqué : le morcellement n’est pas conforme."); return; }
     try { downloadBlob(await buildShapefileZip({ measurement: releve, parcelle, lots: exportLots() }), `${reference}-shapefile.zip`, "application/zip"); notify("Shapefile ZIP généré et téléchargé."); }
     catch (error) { notify(`Échec de l'export Shapefile : ${error instanceof Error ? error.message : "erreur inconnue"}`); }
   };
