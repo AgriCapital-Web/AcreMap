@@ -1,5 +1,5 @@
 // AcreMap Service Worker — hors ligne complet (app shell + assets + tuiles) + notifications
-const CACHE="acremap-v8";const TILE_CACHE="acremap-tiles-v1";const SHELL=["/","/login","/app","/app/measure","/app/parcelles","/app/parcelles/new","/app/morcellement","/app/hierarchie","/app/assistant","/app/releves","/app/validation","/app/users","/app/parametres","/app/import","/app/debug","/app/change-password","/app/traitement","/manifest.webmanifest","/favicon.png","/apple-touch-icon.png","/icon-192.png","/icon-512.png"];
+const CACHE="acremap-v9";const TILE_CACHE="acremap-tiles-v1";const SHELL=["/","/login","/app","/app/measure","/app/parcelles","/app/parcelles/new","/app/morcellement","/app/hierarchie","/app/assistant","/app/releves","/app/validation","/app/users","/app/parametres","/app/import","/app/debug","/app/change-password","/app/traitement","/manifest.webmanifest","/favicon.png","/apple-touch-icon.png","/icon-192.png","/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil((async()=>{
@@ -78,15 +78,24 @@ self.addEventListener("fetch", (event) => {
           (path.startsWith("/app/measure")?(await c.match("/app/measure")):null)||
           (path.startsWith("/app")?(await c.match("/app")):null)||
           (await c.match("/app/measure"))||(await c.match("/app"))||(await c.match("/"));
+        let timer;
         try {
-          const res=await fetch(req);
+          // Ne jamais laisser une navigation terrain attendre indéfiniment le réseau.
+          const controller=new AbortController();
+          timer=setTimeout(()=>controller.abort(),4500);
+          const res=await fetch(req,{signal:controller.signal});
+          clearTimeout(timer);
           if(res.ok&&res.status===200&&(res.headers.get("content-type")||"").includes("text/html")){
             c.put(req,res.clone()).catch(()=>{});
             c.put(path,res.clone()).catch(()=>{});
           }
           return res;
         } catch {
-          return cached || new Response("AcreMap est hors ligne. Ouvrez l’application une fois avec le réseau pour mettre à jour les écrans.",{status:503,headers:{"Content-Type":"text/plain; charset=utf-8"}});
+          if(timer) clearTimeout(timer);
+          return cached || new Response(
+            "<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>AcreMap hors ligne</title><body style=\"font:16px system-ui;padding:24px;line-height:1.5\"><h1>AcreMap est hors ligne</h1><p>Aucun écran utilisable n’a été enregistré sur cet appareil. Reconnectez-vous une fois pour préparer l’application avant le terrain.</p><p>Si l’application a déjà été préparée, rouvrez-la depuis son icône installée.</p></body></html>",
+            {status:503,headers:{"Content-Type":"text/html; charset=utf-8"}}
+          );
         }
       })()
     );
