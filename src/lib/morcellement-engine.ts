@@ -398,7 +398,6 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
       });
       // Les morceaux détachés par un découpage concave rejoignent les résiduels.
       pieces.slice(1).forEach((p) => residuels.push(p));
-      rem = rest;
       const previousArea = remArea;
       rem = rest;
       // Recalculer les orientations sur le reliquat : ne pas abandonner
