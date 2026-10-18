@@ -19,7 +19,7 @@ self.addEventListener("install", (e) => {
       try { const r=await fetch(u,{cache:"reload"}); if(r.ok&&r.status===200) await c.put(u,r); } catch {}
     }));
   })());
-  self.skipWaiting();
+  e.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (e) => {
@@ -72,13 +72,21 @@ self.addEventListener("fetch", (event) => {
   if (req.mode === "navigate") {
     event.respondWith(
       (async () => {
+        const c=await caches.open(CACHE);
+        const path=new URL(req.url).pathname;
+        const cached=(await c.match(req,{ignoreSearch:true}))||(await c.match(path))||
+          (path.startsWith("/app/measure")?(await c.match("/app/measure")):null)||
+          (path.startsWith("/app")?(await c.match("/app")):null)||
+          (await c.match("/app/measure"))||(await c.match("/app"))||(await c.match("/"));
         try {
           const res=await fetch(req);
-          if(res.ok&&res.status===200&&(res.headers.get("content-type")||"").includes("text/html")){const c=await caches.open(CACHE);c.put(req,res.clone()).catch(()=>{});}
+          if(res.ok&&res.status===200&&(res.headers.get("content-type")||"").includes("text/html")){
+            c.put(req,res.clone()).catch(()=>{});
+            c.put(path,res.clone()).catch(()=>{});
+          }
           return res;
         } catch {
-          const c=await caches.open(CACHE);
-          return (await c.match(req,{ignoreSearch:true}))||(await c.match(new URL(req.url).pathname))||(await c.match("/app"))||(await c.match("/app/measure"))||(await c.match("/"))||new Response("AcreMap est hors ligne. Ouvrez l’application une fois avec le réseau pour mettre à jour les écrans.",{status:503,headers:{"Content-Type":"text/plain; charset=utf-8"}});
+          return cached || new Response("AcreMap est hors ligne. Ouvrez l’application une fois avec le réseau pour mettre à jour les écrans.",{status:503,headers:{"Content-Type":"text/plain; charset=utf-8"}});
         }
       })()
     );
