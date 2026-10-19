@@ -126,8 +126,16 @@ export interface PlanScore {
   residuels: number;
 }
 
+export interface PlanValidation {
+  accessibleLots: number;
+  inaccessibleLots: number;
+  overlappingPairs: number;
+  invalidLots: number;
+}
+
 export interface PlanResult {
   lots: PlanLot[];
+  validation?: PlanValidation;
   voies: PlanVoie[];
   parcelle: [number, number][];
   parcelleGeo?: Pt[];

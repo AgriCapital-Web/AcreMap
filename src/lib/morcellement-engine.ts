@@ -443,21 +443,45 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
       });
     });
 
-  // --- Scores -------------------------------------------------------------
+  // --- Contrôles géométriques et scores ------------------------------------
   const nonConformes = utiles.filter((l) => !l.conforme).length;
   const residuelM2 = residuels.reduce((s, item) => s + planarAreaM2(item.polygon), 0);
   const allocatedM2 = lots.reduce((sum, lot) => sum + (lot.geo ? planarAreaM2(lot.geo.map(projection.forward)) : 0), 0) +
     voies.reduce((sum, voie) => sum + (voie.geo ? planarAreaM2(voie.geo.map(projection.forward)) : 0), 0);
   const balanceErrorM2 = Math.round(totalM2 - allocatedM2);
-  const superficies = utiles.length
-    ? Math.round(100 - (nonConformes / utiles.length) * 100)
-    : 0;
+  const usefulLots = lots.filter((lot) => lot.kind === "lot" && lot.geo && lot.geo.length >= 3);
+  const roadFeatures = voies.filter((road) => road.geo && road.geo.length >= 3)
+    .map((road) => featureOf(road.geo!.map(projection.forward)));
+  let accessibleLots = 0;
+  let invalidLots = 0;
+  const lotFeatures = usefulLots.map((lot) => {
+    const feature = featureOf(lot.geo!.map(projection.forward));
+    if (!turf.booleanValid(feature) || areaOf(feature) <= 0) invalidLots++;
+    if (roadFeatures.some((road) => {
+      try { return turf.booleanIntersects(feature, road); } catch { return false; }
+    })) accessibleLots++;
+    return { lot, feature };
+  });
+  let overlappingPairs = 0;
+  for (let i = 0; i < lotFeatures.length; i++) {
+    for (let j = i + 1; j < lotFeatures.length; j++) {
+      const overlap = intersectSafe(lotFeatures[i].feature, lotFeatures[j].feature);
+      if (overlap && areaOf(overlap) > 1) overlappingPairs++;
+    }
+  }
+  const inaccessibleLots = usefulLots.length - accessibleLots;
+  const validation = { accessibleLots, inaccessibleLots, overlappingPairs, invalidLots };
+  const superficies = utiles.length ? Math.round(100 - (nonConformes / utiles.length) * 100) : 0;
+  const accessibilite = usefulLots.length ? Math.round((accessibleLots / usefulLots.length) * 100) : 0;
+  const formes = Math.round(100 - Math.min(60, (residuelM2 / Math.max(1, totalM2)) * 100 * 2));
+  const voiesScore = usefulLots.length ? Math.round(Math.min(100, (accessibleLots / usefulLots.length) * 100)) : 0;
+  const residuelsScore = Math.round(100 - Math.min(60, (residuelM2 / Math.max(1, totalM2)) * 100 * 2));
   const score: PlanScore = {
     superficies,
-    accessibilite: cfg.voiePrincipale ? (cfg.voiesSecondaires ? 96 : 84) : 60,
-    formes: Math.round(100 - Math.min(40, (residuelM2 / Math.max(1, totalM2)) * 200)),
-    voies: voies.length ? Math.min(100, 70 + voies.length * 6) : 55,
-    residuels: Math.round(100 - Math.min(60, (residuelM2 / Math.max(1, totalM2)) * 100 * 2)),
+    accessibilite,
+    formes,
+    voies: voiesScore,
+    residuels: residuelsScore,
     global: 0,
   };
   score.global = Math.round(
@@ -467,12 +491,13 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
 
   return {
     lots,
+    validation,
     voies,
     parcelle: norm(perimeter),
     parcelleGeo: originalPerimeter,
     axis,
     score,
-    conforme: nonConformes === 0 && utiles.length > 0 && Math.abs(balanceErrorM2) <= TOLERANCE_M2,
+    conforme: nonConformes === 0 && utiles.length > 0 && Math.abs(balanceErrorM2) <= TOLERANCE_M2 && inaccessibleLots === 0 && overlappingPairs === 0 && invalidLots === 0,
     cibleM2,
     totalM2: Math.round(totalM2),
     allocatedM2: Math.round(allocatedM2),

@@ -346,7 +346,10 @@ export function ParcDetail() {
       <aside className="lg:w-[420px] bg-card lg:border-l overflow-y-auto">
         <div className="p-5 space-y-5">
           <div>
-            <Link to="/app/parcelles" className="text-xs text-muted-foreground hover:underline">← Toutes les mesures</Link>
+            <div className="flex items-center justify-between gap-3">
+              <Link to="/app/parcelles" className="text-xs text-muted-foreground hover:underline">← Mesures</Link>
+              <Link to="/app/m" className="text-xs rounded-md bg-primary px-3 py-1.5 text-primary-foreground font-semibold hover:opacity-90">Morcellement intelligent ↗</Link>
+            </div>
             <div className="flex items-center justify-between mt-1">
               <h1 className="text-xl font-bold">{parc?.code ?? `Mesure ${m.id.slice(0, 6)}`}</h1>
               <StatusBadge status={m.status} />

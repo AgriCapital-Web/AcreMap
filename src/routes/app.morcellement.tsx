@@ -652,6 +652,41 @@ function MorcellementPage() {
                   : `${nonConformes.length} lot(s) hors tolérance : ${nonConformes.map((l) => l.code).join(", ")}. Écart du bilan surfacique (levée - attribuée) : ${plan.balanceErrorM2 ?? "non calculé"} m².`}
               </div>
 
+              <section className="bg-card rounded-2xl shadow-card p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-semibold">Contrôle géométrique réel</h3>
+                  <span className={plan.conforme ? "text-xs font-semibold text-primary" : "text-xs font-semibold text-destructive"}>
+                    {plan.conforme ? "Contrôles réussis" : "Plan à corriger"}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Les exports officiels restent bloqués si les surfaces, la géométrie, les chevauchements ou l'accès des lots ne passent pas les contrôles.
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="rounded-xl border p-3">
+                    <div className="text-[11px] text-muted-foreground">Lots avec accès à une voie</div>
+                    <div className="text-xl font-bold">{plan.validation?.accessibleLots ?? "—"}</div>
+                  </div>
+                  <div className="rounded-xl border p-3">
+                    <div className="text-[11px] text-muted-foreground">Lots sans accès vérifié</div>
+                    <div className={`text-xl font-bold ${(plan.validation?.inaccessibleLots ?? 0) > 0 ? "text-destructive" : ""}`}>{plan.validation?.inaccessibleLots ?? "—"}</div>
+                  </div>
+                  <div className="rounded-xl border p-3">
+                    <div className="text-[11px] text-muted-foreground">Chevauchements détectés</div>
+                    <div className={`text-xl font-bold ${(plan.validation?.overlappingPairs ?? 0) > 0 ? "text-destructive" : ""}`}>{plan.validation?.overlappingPairs ?? "—"}</div>
+                  </div>
+                  <div className="rounded-xl border p-3">
+                    <div className="text-[11px] text-muted-foreground">Géométries invalides</div>
+                    <div className={`text-xl font-bold ${(plan.validation?.invalidLots ?? 0) > 0 ? "text-destructive" : ""}`}>{plan.validation?.invalidLots ?? "—"}</div>
+                  </div>
+                </div>
+                {plan.validation && (plan.validation.inaccessibleLots > 0 || plan.validation.overlappingPairs > 0 || plan.validation.invalidLots > 0) && (
+                  <p className="text-xs rounded-lg border border-destructive/30 bg-destructive/5 text-destructive p-3">
+                    Le plan n'est pas validable : corrigez les accès non démontrés, les chevauchements et les géométries invalides avant l'export.
+                  </p>
+                )}
+              </section>
+
               <section className="bg-card rounded-2xl shadow-card overflow-hidden">
                 <div className="p-3 border-b font-semibold flex items-center justify-between gap-2">
                   <span>Tableau des lots ({lots.length})</span>
