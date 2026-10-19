@@ -374,11 +374,27 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
 
   // --- Lots de superficie cible ------------------------------------------
   const utiles: PlanLot[] = [];
-  const blocs = splitPieces(working).sort((a, b) => planarAreaM2(b) - planarAreaM2(a));
-  const residuels: Pt[][] = [];
+  // Le partage est une partition géométrique du terrain net (après voiries,
+  // réserve et collecte), jamais une simple attribution de lots après coup.
+  const blocs: { polygon: Pt[]; part: "ac" | "proprietaire" }[] = [];
+  const pctAC = Math.max(0, Math.min(100, Number.isFinite(cfg.partAcPct) ? cfg.partAcPct : 0));
+  if (cfg.partageActif && working) {
+    const netArea = areaOf(working);
+    if (pctAC > 0 && pctAC < 100) {
+      const split = sliceByArea(working, axis, netArea * pctAC / 100);
+      splitPieces(split.cut).forEach((polygon) => blocs.push({ polygon, part: "ac" }));
+      splitPieces(split.rest).forEach((polygon) => blocs.push({ polygon, part: "proprietaire" }));
+    } else {
+      splitPieces(working).forEach((polygon) => blocs.push({ polygon, part: pctAC >= 100 ? "ac" : "proprietaire" }));
+    }
+  } else {
+    splitPieces(working).forEach((polygon) => blocs.push({ polygon, part: "proprietaire" }));
+  }
+  blocs.sort((a, b) => planarAreaM2(b.polygon) - planarAreaM2(a.polygon));
+  const residuels: { polygon: Pt[]; part: "ac" | "proprietaire" }[] = [];
 
   for (const bloc of blocs) {
-    let rem: AnyPoly | null = featureOf(bloc);
+    let rem: AnyPoly | null = featureOf(bloc.polygon);
     let guard = 0;
     while (rem && guard < 10_000) {
       guard++;
@@ -391,47 +407,36 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
       const reel = Math.round(planarAreaM2(g));
       const code = `H${String(utiles.length + 1).padStart(2, "0")}`;
       utiles.push({
-        code, part: "proprietaire", kind: "lot",
+        code, part: bloc.part, kind: "lot",
         poly: norm(g), geo: toGeo(g), bornes: toBornes(code, g),
         cibleM2, reelM2: reel,
         conforme: Math.abs(reel - cibleM2) <= TOLERANCE_M2,
       });
       // Les morceaux détachés par un découpage concave rejoignent les résiduels.
-      pieces.slice(1).forEach((p) => residuels.push(p));
+      pieces.slice(1).forEach((polygon) => residuels.push({ polygon, part: bloc.part }));
       const previousArea = remArea;
       rem = rest;
       // Recalculer les orientations sur le reliquat : ne pas abandonner
       // toute la parcelle après un seul découpage difficile.
       if (!rest || area <= 0 || areaOf(rest) >= previousArea - 0.5) break;
     }
-    splitPieces(rem).forEach((p) => residuels.push(p));
+    splitPieces(rem).forEach((polygon) => residuels.push({ polygon, part: bloc.part }));
   }
 
-  // --- Partage AC / Propriétaire -----------------------------------------
-  if (cfg.partageActif && utiles.length) {
-    const ordered = cfg.organisationPartage === "blocs" ? [...utiles] : [...utiles].sort((a, b) => a.code.localeCompare(b.code));
-    const pct = Math.max(0, Math.min(100, Number.isFinite(cfg.partAcPct) ? cfg.partAcPct : 0));
-    const targetAcM2 = ordered.reduce((sum, lot) => sum + lot.reelM2, 0) * pct / 100;
-    let cumulative = 0, bestCount = 0, bestError = Math.abs(targetAcM2);
-    for (let i = 0; i < ordered.length; i++) {
-      cumulative += ordered[i].reelM2;
-      const error = Math.abs(cumulative - targetAcM2);
-      if (error < bestError) { bestError = error; bestCount = i + 1; }
-    }
-    ordered.forEach((lot, i) => { lot.part = i < bestCount ? "ac" : "proprietaire"; });
-  }
+  // Le champ part est défini par la zone géométrique source de chaque lot.
 
   lots.push(...utiles);
 
   // --- Reliquats ----------------------------------------------------------
   residuels
-    .filter((p) => planarAreaM2(p) > 0.5)
-    .sort((a, b) => planarAreaM2(b) - planarAreaM2(a))
-    .forEach((p, i) => {
+    .filter((item) => planarAreaM2(item.polygon) > 0.5)
+    .sort((a, b) => planarAreaM2(b.polygon) - planarAreaM2(a.polygon))
+    .forEach((item, i) => {
+      const p = item.polygon;
       const code = `R${String(i + 1).padStart(2, "0")}`;
       const a = Math.round(planarAreaM2(p));
       lots.push({
-        code, part: "proprietaire", kind: "reserve",
+        code, part: item.part, kind: "reserve",
         poly: norm(p), geo: toGeo(p), bornes: toBornes(code, p),
         cibleM2: a, reelM2: a, conforme: true,
         label: `RELIQUAT ${code} — ${a.toLocaleString("fr-FR")} m²`,
@@ -440,7 +445,7 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
 
   // --- Scores -------------------------------------------------------------
   const nonConformes = utiles.filter((l) => !l.conforme).length;
-  const residuelM2 = residuels.reduce((s, p) => s + planarAreaM2(p), 0);
+  const residuelM2 = residuels.reduce((s, item) => s + planarAreaM2(item.polygon), 0);
   const allocatedM2 = lots.reduce((sum, lot) => sum + (lot.geo ? planarAreaM2(lot.geo.map(projection.forward)) : 0), 0) +
     voies.reduce((sum, voie) => sum + (voie.geo ? planarAreaM2(voie.geo.map(projection.forward)) : 0), 0);
   const balanceErrorM2 = Math.round(totalM2 - allocatedM2);

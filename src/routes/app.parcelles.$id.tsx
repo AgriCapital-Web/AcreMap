@@ -81,7 +81,7 @@ function EmptyParcelleState({ parc, dom, sp }: { parc?: Parcelle | null; dom?: D
   );
 }
 
-function ParcDetail() {
+export function ParcDetail() {
   const { id } = Route.useParams();
   const user = useAuth((s) => s.user);
   const nav = useNavigate();
