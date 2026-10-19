@@ -205,14 +205,46 @@ function sliceNearCoordinate(poly: AnyPoly, axis: Axis, targetM2: number, coordi
   return { cut: selected, rest: differenceSafe(poly, selected), area };
 }
 
-/** Bande de largeur `widthM` positionnée à `frac` (0..1) le long de l'axe. */
-function bandAt(poly: AnyPoly, axis: Axis, frac: number, widthM: number): { band: AnyPoly | null; rest: AnyPoly | null } {
-  const bbox = turf.bbox(poly);
-  const [minX, minY, maxX, maxY] = bbox;
+/** Direction dominante des limites réelles, calculée dans le repère métrique. */
+function dominantEdgeAngle(poly: AnyPoly): number {
+  const rings = poly.geometry.type === "Polygon"
+    ? [poly.geometry.coordinates[0]]
+    : poly.geometry.coordinates.map((part) => part[0]);
+  let best = { length: 0, angle: 0 };
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length - 1; i++) {
+      const a = ring[i], b = ring[i + 1];
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      const length = Math.hypot(dx, dy);
+      if (length > best.length) best = { length, angle: Math.atan2(dy, dx) };
+    }
+  }
+  return best.angle;
+}
+
+/** Bande routière orientée selon le terrain, pas selon la boîte englobante XY. */
+function bandAt(poly: AnyPoly, angle: number, frac: number, widthM: number): { band: AnyPoly | null; rest: AnyPoly | null } {
+  const rings = poly.geometry.type === "Polygon"
+    ? [poly.geometry.coordinates[0]]
+    : poly.geometry.coordinates.map((part) => part[0]);
+  const vertices = rings.flat();
+  const nx = -Math.sin(angle), ny = Math.cos(angle);
+  const projections = vertices.map(([x, y]) => x * nx + y * ny);
+  const min = Math.min(...projections), max = Math.max(...projections);
+  const center = min + (max - min) * frac;
   const half = widthM / 2;
-  const center = axis === "horizontal" ? minY + (maxY - minY) * frac : minX + (maxX - minX) * frac;
-  const box = boxAlong(bbox, axis, center - half, center + half);
-  const band = intersectSafe(poly, box);
+  const reach = Math.hypot(turf.bbox(poly)[2] - turf.bbox(poly)[0], turf.bbox(poly)[3] - turf.bbox(poly)[1]) * 4 + widthM + 20;
+  const dx = Math.cos(angle), dy = Math.sin(angle);
+  const point = (along: number, across: number): [number, number] => [
+    dx * along + nx * across,
+    dy * along + ny * across,
+  ];
+  const a = point(-reach, center - half);
+  const b = point(reach, center - half);
+  const c = point(reach, center + half);
+  const d = point(-reach, center + half);
+  const clip = turf.polygon([[a, b, c, d, a]]) as Feature<Polygon>;
+  const band = intersectSafe(poly, clip);
   const rest = band ? differenceSafe(poly, band) : poly;
   return { band, rest };
 }
@@ -298,9 +330,10 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
 
   // --- Voie principale ---------------------------------------------------
   if (cfg.voiePrincipale && working) {
-    const voieAxis: Axis = cfg.orientationVoie === "verticale" ? "vertical"
-      : cfg.orientationVoie === "horizontale" ? "horizontal"
-      : perpendicular(axis);
+    const terrainAngle = dominantEdgeAngle(working);
+    const voieAngle = cfg.orientationVoie === "verticale" ? Math.PI / 2
+      : cfg.orientationVoie === "horizontale" ? 0 : terrainAngle;
+    const voieAxis: Axis = Math.abs(Math.sin(voieAngle)) > Math.abs(Math.cos(voieAngle)) ? "vertical" : "horizontal";
     const frac = cfg.positionVoie === "laterale" ? 0.15
       : cfg.positionVoie === "centrale" || cfg.positionVoie === "traversante" ? 0.5 : 0.35;
     const roadBox = turf.bbox(working);
@@ -308,7 +341,7 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
     mainRoadCoordinate = voieAxis === "horizontal"
       ? roadBox[1] + (roadBox[3] - roadBox[1]) * frac
       : roadBox[0] + (roadBox[2] - roadBox[0]) * frac;
-    const { band, rest } = bandAt(working, voieAxis, frac, cfg.largeurVoieM);
+    const { band, rest } = bandAt(working, voieAngle, frac, cfg.largeurVoieM);
     for (const p of splitPieces(band)) {
       voies.push({ kind: "principale", largeurM: cfg.largeurVoieM, poly: norm(p), geo: toGeo(p) });
     }
@@ -317,13 +350,17 @@ export function buildPlan({ perimeter, config: cfg }: EngineInput): PlanResult {
 
   // --- Voies secondaires --------------------------------------------------
   if (cfg.voiesSecondaires && cfg.nbVoiesSec > 0 && working) {
-    const secAxis: Axis = cfg.orientationVoieSec === "verticale" ? "vertical"
-      : cfg.orientationVoieSec === "horizontale" ? "horizontal"
-      : axis;
+    const mainAngle = mainRoadAxis === null ? dominantEdgeAngle(working) : (
+      cfg.orientationVoie === "verticale" ? Math.PI / 2
+        : cfg.orientationVoie === "horizontale" ? 0 : dominantEdgeAngle(working)
+    );
+    const secAngle = cfg.orientationVoieSec === "verticale" ? Math.PI / 2
+      : cfg.orientationVoieSec === "horizontale" ? 0
+      : mainAngle + Math.PI / 2;
     for (let i = 1; i <= cfg.nbVoiesSec; i++) {
       if (!working) break;
       const frac = i / (cfg.nbVoiesSec + 1);
-      const { band, rest } = bandAt(working, secAxis, frac, cfg.largeurVoieSecM);
+      const { band, rest } = bandAt(working, secAngle, frac, cfg.largeurVoieSecM);
       for (const p of splitPieces(band)) {
         voies.push({ kind: "secondaire", largeurM: cfg.largeurVoieSecM, poly: norm(p), geo: toGeo(p) });
       }
