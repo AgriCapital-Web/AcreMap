@@ -99,11 +99,23 @@
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "7.3.2"
+    "vite": "7.3.7",
+    "@tanstack/router-plugin": "1.169.0"
   },
   "overrides": {
     "seroval": "^1.6.2",
     "seroval-plugins": "^1.6.2",
-    "@tanstack/start-server-core": "1.169.39"
+    "@tanstack/start-server-core": "1.169.39",
+    "@neondatabase/auth": {
+      "better-auth": "1.7.7",
+      "@better-auth/core": "1.7.7",
+      "@better-auth/oauth-provider": "1.7.7",
+      "zod": "4.6.7"
+    },
+    "@neondatabase/auth-ui": {
+      "better-auth": "1.7.7",
+      "@better-auth/passkey": "1.7.7",
+      "zod": "4.6.7"
+    }
   }
 }
