@@ -2,12 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { getNeonSql } from "@/integrations/neon/db.server";
 
-function env(name: string) {
-  return process.env.VERCEL_ENV === "production"
-    ? process.env[name]
-    : process.env[`${name}_DEV`] ?? process.env[name];
-}
-
 export const Route = createFileRoute("/api/v1/integration")({
   server: { handlers: {
     GET: async ({ request }) => {
