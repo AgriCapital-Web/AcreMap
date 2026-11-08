@@ -10,80 +10,54 @@ export const Route = createFileRoute("/app/parametres")({
   head: () => ({ meta: [{ title: "Paramètres & intégrations — AcreMap" }] }),
 });
 
-type Checks = Record<string, boolean>;
-const CRM_WEBHOOK_URL = "https://rfzfsmpsuempafhkqhra.supabase.co/functions/v1/acremap-webhook";
-const ACREMAP_BASE_URL = "https://acremap.agricapital.ci";
 const VARS = [
-  ["SUPABASE_URL", "URL du projet Supabase AcreMap"],
-  ["SUPABASE_PUBLISHABLE_KEY", "Clé publique Supabase côté serveur"],
-  ["VITE_SUPABASE_URL", "URL Supabase utilisée par le navigateur"],
-  ["VITE_SUPABASE_PUBLISHABLE_KEY", "Clé publique utilisée par le navigateur"],
-  ["SUPABASE_SERVICE_ROLE_KEY", "Clé secrète serveur pour les opérations d’administration"],
-  ["SUPABASE_ACCESS_TOKEN", "Jeton Supabase Management API pour exécuter les migrations"],
-  ["SUPABASE_PROJECT_REF", "Référence du projet Supabase cible des migrations"],
-  ["ACREMAP_CRM_API_KEY", "Clé Bearer utilisée par le CRM pour envoyer les propriétaires"],
-  ["CRM_WEBHOOK_URL", "Adresse du webhook entrant dans le CRM"],
-  ["CRM_WEBHOOK_SECRET", "Secret HMAC partagé avec le CRM"],
+  ["NEON_DATABASE_URL_DEV", "Connexion PostgreSQL Neon — serveur"],
+  ["VITE_NEON_AUTH_URL_DEV", "Neon Managed Better Auth"],
+  ["VITE_NEON_DATA_API_URL_DEV", "Neon Data API"],
+  ["NEON_PROJECT_ID_DEV", "Projet Neon AcreMap"],
+  ["NEON_BRANCH_ID_DEV", "Branche Neon de développement"],
+  ["AWS_ACCESS_KEY_ID_DEV", "Identifiant S3 Neon"],
+  ["AWS_SECRET_ACCESS_KEY_DEV", "Secret S3 Neon"],
+  ["AWS_ENDPOINT_URL_S3_DEV", "Endpoint Neon Object Storage"],
+  ["AWS_REGION_DEV", "Région de stockage"],
+  ["ACREMAP_CRM_API_KEY_DEV", "Clé API CRM → AcreMap"],
+  ["CRM_WEBHOOK_URL_DEV", "Webhook AcreMap → CRM"],
+  ["CRM_WEBHOOK_SECRET_DEV", "Secret HMAC partagé"],
+  ["CRM_INTEGRATION_ENABLED_DEV", "Drapeau d'activation de l'intégration"],
 ] as const;
-
-function makeSecret(prefix = "") {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return prefix + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 function IntegrationSettingsPage() {
   const user = useAuth((s) => s.user);
   const getStatus = useServerFn(getIntegrationEnvironmentStatus);
-  const migrate = useServerFn(runAcreMapMigrations);
-  const [checks, setChecks] = useState<Checks | null>(null);
+  const verifySchema = useServerFn(runAcreMapMigrations);
+  const [checks, setChecks] = useState<Record<string, boolean> | null>(null);
+  const [crmEnabled, setCrmEnabled] = useState(false);
+  const [schema, setSchema] = useState<{ version: string; appliedAt: string; message: string } | null>(null);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [webhookSecret, setWebhookSecret] = useState("");
-  const [showSecrets, setShowSecrets] = useState(false);
-  const [copied, setCopied] = useState("");
-  const [migrating, setMigrating] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   async function refresh() {
     setError("");
     try {
       const result = await getStatus();
       setChecks(result.checks);
+      setCrmEnabled(result.crmEnabled);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Statut indisponible");
     }
   }
   useEffect(() => { if (user?.role === "admin") void refresh(); }, [user?.id]);
 
-  async function copy(label: string, value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(label);
-      window.setTimeout(() => setCopied(""), 2200);
-    } catch {
-      setError("Copie automatique indisponible : sélectionnez puis copiez la valeur manuellement.");
-    }
-  }
-  function generate() {
-    setApiKey(makeSecret("acremap_live_"));
-    setWebhookSecret(makeSecret("acremap_hmac_"));
-    setShowSecrets(true);
-    setSuccess("");
-  }
-  async function runMigration() {
-    if (!confirm("Exécuter la migration AcreMap sur la base de production ? Cette opération crée/complète les objets manquants de manière idempotente.")) return;
-    setMigrating(true);
+  async function checkSchema() {
+    setBusy(true);
     setError("");
-    setSuccess("");
     try {
-      const result = await migrate({ data: {} });
-      setSuccess(result.message);
-      await refresh();
+      const result = await verifySchema({ data: {} });
+      setSchema(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "La migration a échoué.");
+      setError(e instanceof Error ? e.message : "Vérification Neon impossible.");
     } finally {
-      setMigrating(false);
+      setBusy(false);
     }
   }
 
@@ -91,26 +65,25 @@ function IntegrationSettingsPage() {
   if (user.role !== "admin") return <div className="mx-auto max-w-xl p-4 sm:p-8 text-center">Accès réservé à l’administrateur principal.</div>;
 
   return <div className="mx-auto w-full max-w-5xl min-w-0 space-y-4 p-3 sm:space-y-6 sm:p-6 lg:p-8">
-    <header className="min-w-0">
+    <header>
       <p className="text-xs font-semibold uppercase tracking-wide text-primary">Administration</p>
       <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Paramètres & intégrations</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Environnement de développement — Neon, stockage privé et liaison CRM.</p>
     </header>
 
     {error && <div role="alert" className="break-words rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
-    {success && <div role="status" className="break-words rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900">{success}</div>}
+    {schema && <div role="status" className="break-words rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900">{schema.message}<div className="mt-1 text-xs">Appliquée le {new Date(schema.appliedAt).toLocaleString()}</div></div>}
 
-    <section className="min-w-0 space-y-3 rounded-xl border bg-card p-3 sm:p-5">
+    <section className="space-y-3 rounded-xl border bg-card p-3 sm:p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div><h2 className="text-lg font-semibold">1. Migration de la base AcreMap</h2><p className="mt-1 text-sm text-muted-foreground">Tables, colonne propriétaire, relation, politiques RLS et bucket privé « imports ».</p></div>
-        <button disabled={migrating} onClick={() => void runMigration()} className="w-full shrink-0 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60 sm:w-auto">
-          {migrating ? "Migration en cours…" : "Exécuter la migration"}
-        </button>
+        <div><h2 className="text-lg font-semibold">1. Base de données Neon</h2><p className="mt-1 text-sm text-muted-foreground">Vérification du schéma, des relations et des politiques RLS sur la branche de développement.</p></div>
+        <button disabled={busy} onClick={() => void checkSchema()} className="w-full rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60 sm:w-auto">{busy ? "Vérification…" : "Vérifier le schéma Neon"}</button>
       </div>
     </section>
 
-    <section className="min-w-0 space-y-3 rounded-xl border bg-card p-3 sm:p-5">
+    <section className="space-y-3 rounded-xl border bg-card p-3 sm:p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div><h2 className="text-lg font-semibold">2. Variables serveur</h2></div>
+        <div><h2 className="text-lg font-semibold">2. Variables d'environnement</h2><p className="mt-1 text-sm text-muted-foreground">Seuls les états de présence sont affichés. Aucune clé ni valeur secrète n'est exposée.</p></div>
         <button onClick={() => void refresh()} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">Actualiser</button>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
@@ -121,26 +94,12 @@ function IntegrationSettingsPage() {
       </div>
     </section>
 
-    <section className="min-w-0 space-y-3 rounded-xl border bg-card p-3 sm:p-5">
-      <h2 className="text-lg font-semibold">3. Générer les secrets AcreMap ↔ CRM</h2>
-      <button onClick={generate} className="w-full rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground sm:w-auto">Générer une clé API et un secret HMAC</button>
-      {showSecrets && <>
-        <div className="min-w-0 space-y-2">
-          <label className="block text-sm font-medium">ACREMAP_CRM_API_KEY</label>
-          <div className="flex min-w-0 flex-col gap-2 sm:flex-row"><input readOnly value={apiKey} className="min-w-0 w-full flex-1 rounded-lg border bg-muted px-3 py-2 font-mono text-xs" /><button onClick={() => void copy("api", apiKey)} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">{copied === "api" ? "Copié" : "Copier"}</button></div>
-        </div>
-        <div className="min-w-0 space-y-2">
-          <label className="block text-sm font-medium">CRM_WEBHOOK_SECRET</label>
-          <div className="flex min-w-0 flex-col gap-2 sm:flex-row"><input readOnly value={webhookSecret} className="min-w-0 w-full flex-1 rounded-lg border bg-muted px-3 py-2 font-mono text-xs" /><button onClick={() => void copy("hmac", webhookSecret)} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">{copied === "hmac" ? "Copié" : "Copier"}</button></div>
-        </div>
-      </>}
+    <section className="space-y-3 rounded-xl border bg-card p-3 sm:p-5">
+      <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-semibold">3. Intégration CRM</h2>
+        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${crmEnabled ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>{crmEnabled ? "Activée" : "Configurée — désactivée en développement"}</span>
+      </div>
+      <p className="text-sm text-muted-foreground">Les clés de développement sont préparées. Les échanges de données restent désactivés pour éviter d'envoyer des données réelles du CRM dans la base de test. La configuration de production n'est pas modifiée.</p>
+      <p className="text-xs text-muted-foreground">Domaine de production réservé au futur basculement : https://acremap.agricapital.ci</p>
     </section>
-
-    <section className="min-w-0 space-y-3 rounded-xl border bg-card p-3 sm:p-5">
-      <h2 className="text-lg font-semibold">4. Connexions</h2>
-      <div className="space-y-1"><label className="text-sm font-medium">URL AcreMap</label><div className="flex min-w-0 flex-col gap-2 sm:flex-row"><input readOnly value={ACREMAP_BASE_URL} className="min-w-0 w-full flex-1 rounded-lg border bg-muted px-3 py-2 text-xs" /><button onClick={() => void copy("base", ACREMAP_BASE_URL)} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">{copied === "base" ? "Copié" : "Copier"}</button></div></div>
-      <div className="space-y-1"><label className="text-sm font-medium">Webhook CRM</label><div className="flex min-w-0 flex-col gap-2 sm:flex-row"><input readOnly value={CRM_WEBHOOK_URL} className="min-w-0 w-full flex-1 rounded-lg border bg-muted px-3 py-2 text-xs" /><button onClick={() => void copy("url", CRM_WEBHOOK_URL)} className="w-full rounded-lg border px-3 py-2 text-sm sm:w-auto">{copied === "url" ? "Copié" : "Copier"}</button></div></div>
-    </section>
-
   </div>;
 }
