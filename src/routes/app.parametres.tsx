@@ -52,7 +52,7 @@ function IntegrationSettingsPage() {
     setBusy(true);
     setError("");
     try {
-      const result = await verifySchema({ data: {} });
+      const result = await verifySchema();
       setSchema(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Vérification Neon impossible.");
