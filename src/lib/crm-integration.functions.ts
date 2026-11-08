@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { createServerFn } from "@tanstack/react-start";
 import { requireNeonAuth } from "@/integrations/neon/auth-middleware";
 import { getNeonSql } from "@/integrations/neon/db.server";
@@ -39,7 +39,7 @@ export const publishMorcellementToCrm = createServerFn({ method: "POST" })
     const assignedOwnerIds = [...new Set(data.lots.map((lot) => lot.assignee_owner_id).filter((id): id is string => Boolean(id)))];
     const ownerId = data.plan.owner_id ?? (assignedOwnerIds.length === 1 ? assignedOwnerIds[0] : null);
     const environment = process.env.VERCEL_ENV === "production" ? "production" : "development";
-    const payload = JSON.stringify({ event: "morcellement.published", event_id: randomUUID(), occurred_at: new Date().toISOString(), owner_id: ownerId, plan: { ...data.plan, owner_id: ownerId }, lots: data.lots });
+    const payload = JSON.stringify({ event: "morcellement.published", event_id: data.plan.id + ":" + data.plan.updated_at, occurred_at: new Date().toISOString(), owner_id: ownerId, plan: { ...data.plan, owner_id: ownerId }, lots: data.lots });
     const signature = createHmac("sha256", secret).update(payload).digest("hex");
     const response = await fetch(url.toString(), {
       method: "POST",
