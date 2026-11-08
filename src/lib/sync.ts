@@ -167,9 +167,10 @@ export async function flushImportQueue(): Promise<{ ok: number; failed: number }
   for (const it of items) {
     try {
       const userId = await currentUserId();
-      const storagePath = `${userId ?? "anonymous"}/${Date.now()}-${it.name.replace(/[^\w.-]+/g, "_")}`;
-      const up = await supabase.storage.from("imports").upload(storagePath, it.blob, { upsert: true });
-      if (up.error) throw up.error;
+      if (!userId) throw new Error("Connexion requise pour synchroniser les fichiers.");
+      const safeName = it.name.replace(/[^\\w.-]+/g, "_");
+      const uploaded = await uploadNeonObject("imports", safeName, it.blob);
+      const storagePath = uploaded.key;
       const ins = await supabase.from("imports").insert({
         parcelle_id: it.parcelleId || null,
         file_name: it.name,
