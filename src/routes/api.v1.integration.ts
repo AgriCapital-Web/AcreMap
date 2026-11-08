@@ -82,11 +82,6 @@ async function authenticate(request: Request): Promise<boolean> {
   const provided = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
   if (!provided) return false;
   const providedHash = createHash("sha256").update(provided).digest();
-  const expected = env("ACREMAP_CRM_API_KEY");
-  if (expected) {
-    const expectedHash = createHash("sha256").update(expected).digest();
-    if (timingSafeEqual(expectedHash, providedHash)) return true;
-  }
   try {
     const sql = getNeonSql();
     const rows = await sql`SELECT id FROM public.crm_api_keys WHERE key_hash = ${providedHash.toString("hex")} AND revoked_at IS NULL LIMIT 1`;
