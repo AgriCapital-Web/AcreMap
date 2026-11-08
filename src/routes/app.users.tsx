@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
 import { useAuth, hasRole } from "@/lib/auth";
 import {
   listUsersAdmin, createUserAdmin, setUserRoleAdmin,
@@ -31,12 +30,12 @@ type Row = {
 function UsersPage() {
   const me = useAuth((s) => s.user);
   const nav = useNavigate();
-  const list = useServerFn(listUsersAdmin);
-  const createFn = useServerFn(createUserAdmin);
-  const setRole = useServerFn(setUserRoleAdmin);
-  const toggleDisabled = useServerFn(toggleUserDisabledAdmin);
-  const resetPw = useServerFn(resetUserPasswordAdmin);
-  const updateFn = useServerFn(updateUserAdmin);
+  const list = listUsersAdmin;
+  const createFn = createUserAdmin;
+  const setRole = setUserRoleAdmin;
+  const toggleDisabled = toggleUserDisabledAdmin;
+  const resetPw = resetUserPasswordAdmin;
+  const updateFn = updateUserAdmin;
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);

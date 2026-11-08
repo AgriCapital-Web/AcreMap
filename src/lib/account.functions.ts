@@ -1,24 +1,26 @@
-// Changement de mot de passe par l'utilisateur lui-même.
-// Le drapeau must_change_password est effacé côté serveur UNIQUEMENT après une
-// mise à jour réussie du mot de passe (les utilisateurs ne peuvent pas modifier
-// ce champ directement : un trigger le protège).
 import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { z } from "zod";
+import { neonAuth } from "@/integrations/neon/client";
+import { requireNeonAuth } from "@/integrations/neon/auth-middleware";
 
-export const changeOwnPassword = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ password: z.string().min(8).max(200) }).parse(d))
-  .handler(async ({ data, context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(context.userId, {
-      password: data.password,
-    });
-    if (error) throw new Error("Impossible de mettre à jour le mot de passe");
-    const { error: pErr } = await supabaseAdmin
-      .from("profiles")
-      .update({ must_change_password: false })
-      .eq("id", context.userId);
-    if (pErr) throw new Error("Impossible de mettre à jour le profil");
+const clearPasswordChangeFlag = createServerFn({ method: "POST" })
+  .middleware([requireNeonAuth])
+  .handler(async ({ context }) => {
+    const { getNeonSql } = await import("@/integrations/neon/db.server");
+    const sql = getNeonSql();
+    await sql`UPDATE public.profiles SET must_change_password = false WHERE id = ${context.userId}::uuid`;
     return { ok: true };
   });
+
+export async function changeOwnPassword(input: { currentPassword: string; password: string }) {
+  if (!input.currentPassword || input.password.length < 8 || input.password.length > 200) {
+    throw new Error("Le mot de passe actuel et un nouveau mot de passe de 8 caractères minimum sont requis.");
+  }
+  const result = await neonAuth.auth.changePassword({
+    currentPassword: input.currentPassword,
+    newPassword: input.password,
+    revokeOtherSessions: true,
+  });
+  if (result?.error) throw new Error(result.error.message ?? "Impossible de mettre à jour le mot de passe.");
+  await clearPasswordChangeFlag();
+  return { ok: true };
+}

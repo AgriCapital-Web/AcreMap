@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/neon/client";
 import { db, isBrowser } from "@/lib/db";
 import type { Role, User } from "./types";
 type CachedUser=User&{email?:string;mustChangePassword?:boolean;disabled?:boolean};

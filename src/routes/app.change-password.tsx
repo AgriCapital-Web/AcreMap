@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
 import { Logo } from "@/components/Logo";
 import { useAuth } from "@/lib/auth";
 import { changeOwnPassword } from "@/lib/account.functions";
@@ -13,7 +12,8 @@ export const Route = createFileRoute("/app/change-password")({
 function ChangePasswordPage() {
   const nav = useNavigate();
   const refreshProfile = useAuth((s) => s.refreshProfile);
-  const updatePassword = useServerFn(changeOwnPassword);
+  const updatePassword = changeOwnPassword;
+  const [currentPassword, setCurrentPassword] = useState("");
   const [p1, setP1] = useState("");
   const [p2, setP2] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -22,11 +22,12 @@ function ChangePasswordPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
+    if (!currentPassword) { setErr("Saisissez votre mot de passe temporaire actuel."); return; }
     if (p1.length < 8) { setErr("Mot de passe : 8 caractères minimum"); return; }
     if (p1 !== p2) { setErr("Les deux mots de passe ne correspondent pas"); return; }
     setBusy(true);
     try {
-      await updatePassword({ data: { password: p1 } });
+      await updatePassword({ currentPassword, password: p1 });
       await refreshProfile();
       nav({ to: "/app" });
     } catch (e: any) { setErr(e.message); }
@@ -44,6 +45,11 @@ function ChangePasswordPage() {
             Vous utilisez un mot de passe temporaire. Définissez votre mot de passe personnel pour continuer.
           </p>
         </div>
+        <label className="block">
+          <span className="text-xs font-medium text-muted-foreground">Mot de passe temporaire actuel</span>
+          <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)}
+            className="mt-1 w-full h-11 px-3 rounded-lg border bg-background" autoComplete="current-password" />
+        </label>
         <label className="block">
           <span className="text-xs font-medium text-muted-foreground">Nouveau mot de passe</span>
           <input type="password" value={p1} onChange={(e) => setP1(e.target.value)}

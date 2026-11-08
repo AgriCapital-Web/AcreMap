@@ -75,7 +75,7 @@ function DebugPage() {
 
   async function runMigration() {
     if (!navigator.onLine) { alert("Vous êtes hors-ligne. Reconnectez-vous d'abord."); return; }
-    if (!confirm("Importer toutes les données locales (SP, domaines, parcelles, mesures, lots) vers Supabase ? Les enregistrements déjà présents seront mis à jour (upsert).")) return;
+    if (!confirm("Importer toutes les données locales (SP, domaines, parcelles, mesures, lots) vers Neon ? Les enregistrements déjà présents seront mis à jour (upsert).")) return;
     setMigRunning(true);
     setMigResult(null);
     setMigProgress({ table: "sps", done: 0, total: 0, ok: 0, failed: 0 });
@@ -105,7 +105,7 @@ function DebugPage() {
       <h1 className="text-2xl font-bold">Diagnostic & synchronisation</h1>
       <p className="text-sm text-muted-foreground">
         Vos données sont d'abord stockées dans le navigateur (IndexedDB). Lancez la migration
-        pour les envoyer vers le cloud Supabase. Toute écriture future en mode hors-ligne est
+        pour les envoyer vers le cloud Neon. Toute écriture future en mode hors-ligne est
         mise en file d'attente et synchronisée automatiquement dès la reconnexion.
       </p>
 
@@ -127,7 +127,7 @@ function DebugPage() {
       </div>
 
       <div className="bg-card rounded-xl p-4 shadow-card space-y-3">
-        <h2 className="font-semibold">Migration IndexedDB → Supabase</h2>
+        <h2 className="font-semibold">Migration IndexedDB → Neon</h2>
         <p className="text-xs text-muted-foreground">
           Importe une fois toutes les données déjà créées sur cet appareil dans le cloud.
           L'opération est idempotente : vous pouvez la relancer sans créer de doublons.

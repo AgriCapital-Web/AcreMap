@@ -1,5 +1,5 @@
 // AcreMap — Mode hors ligne complet
-// - Pré-chargement en arrière-plan des données de référence (Supabase → IndexedDB)
+// - Pré-chargement en arrière-plan des données de référence (Neon → IndexedDB)
 // - Pré-chargement des tuiles cartographiques de la zone de travail
 // - Suivi de l'état réseau
 import { db, isBrowser } from "./db";

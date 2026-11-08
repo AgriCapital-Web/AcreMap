@@ -1,7 +1,7 @@
 // Registre des sous-préfectures : le référentiel national est en lecture seule.
 // Une référence officielle SP00X n'est créée QUE lors du premier déploiement
 // terrain sur cette sous-préfecture (première sélection) — puis propagée en base.
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/neon/client";
 import { db, isBrowser } from "./db";
 import { findSpRef, listAllSps } from "./ci-admin";
 import { nextSequentialCode } from "./ref";
