@@ -11,7 +11,7 @@ function env(name: string) {
 export const Route = createFileRoute("/api/v1/integration")({
   server: { handlers: {
     GET: async ({ request }) => {
-      if (!authenticate(request)) return json({ error: "unauthorized" }, 401);
+      if (!(await authenticate(request))) return json({ error: "unauthorized" }, 401);
       const sql = getNeonSql();
       const resource = new URL(request.url).searchParams.get("resource") ?? "health";
       try {
