@@ -17,7 +17,10 @@ jobs:
         with:
           node-version: 24
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
+          for pkg in core-js esbuild; do npm install-scripts approve "$pkg"; done
+          npm rebuild
       - name: Build application
         run: npm run build
       - name: Check TypeScript
