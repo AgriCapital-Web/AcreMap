@@ -23,6 +23,8 @@ jobs:
       - name: Install and resolve compatible updates
         run: |
           npm install
+          for pkg in core-js esbuild; do npm install-scripts approve "$pkg"; done
+          npm rebuild
           npm update
           npm audit fix || true
       - name: Build
