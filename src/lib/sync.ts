@@ -1,7 +1,8 @@
-// Cloud sync — IndexedDB → Supabase, offline-safe.
-// Strategy: every Dexie row is mirrored to Supabase on demand (idempotent upsert).
+// Cloud sync — IndexedDB → Neon Data API, offline-safe.
+// Strategy: every Dexie row is mirrored to Neon on demand (idempotent upsert).
 // Failures stay queued in the `outbox` table and are retried on `online` event.
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/neon/client";
+import { uploadNeonObject } from "@/lib/storage";
 import { db, isBrowser, type OutboxEntry } from "./db";
 import type { Domaine, Lot, Measurement, MorcPlan, Parcelle, SP } from "./types";
 
@@ -206,7 +207,7 @@ export async function syncEntity(table: TableName, id: string): Promise<void> {
   if(navigator.onLine){try{const outgoing={...payload};if(table==="measurements"){outgoing.sync_state="synced";outgoing.synced_at=new Date().toISOString();}await pushUpsert(table,outgoing);if(table==="measurements")await local.measurements.update(id,{syncState:"synced",syncedAt:Date.now()});await local.outbox.delete([table,id] as never);return;}catch(e){throw e;}}
 }
 
-// ---- Full migration from local IndexedDB to Supabase ----
+// ---- Full migration from local IndexedDB to Neon ----
 export interface MigrationProgress {
   table: TableName | "done";
   done: number;
@@ -253,7 +254,7 @@ export async function migrateLocalToCloud(onProgress: (p: MigrationProgress) => 
   return { ok: totalOk, failed: totalFailed, perTable };
 }
 
-// ---- Lecture depuis Supabase → cache local IndexedDB (hors ligne) ----
+// ---- Lecture depuis Neon → cache local IndexedDB (hors ligne) ----
 function ts(v: string | null | undefined): number {
   return v ? new Date(v).getTime() : Date.now();
 }
