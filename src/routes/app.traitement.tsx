@@ -79,10 +79,9 @@ function TraitementPage() {
           continue;
         }
         const { data: auth } = await supabase.auth.getUser();
-        const uid = auth.user?.id ?? "anonymous";
-        const path = `${uid}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
-        const up = await supabase.storage.from("imports").upload(path, file, { upsert: true });
-        if (up.error) { toast.error(`${file.name} : ${up.error.message}`); continue; }
+        if (!auth.user?.id) { toast.error("Connexion requise pour importer un fichier."); continue; }
+        const uploaded = await uploadNeonObject("imports", file.name, file);
+        const path = uploaded.key;
         const ins = await supabase.from("imports").insert({
           parcelle_id: targetParcelle || null,
           file_name: file.name,
