@@ -72,7 +72,8 @@ export async function createUserAdmin({ data }: Input<{ fullName: string; userna
     role: data.role === "admin" ? "admin" : "user",
     data: { full_name: fullName, username },
   });
-  const user = unwrap<any>(created, "Impossible de créer le compte Neon.")?.user;
+  const createdData = unwrap<any>(created, "Impossible de créer le compte Neon.");
+  const user = createdData?.user ?? createdData;
   if (!user?.id) throw new Error("Neon n'a pas retourné l'identifiant du nouveau compte.");
   const { error: profileError } = await supabase.from("profiles").upsert({
     id: user.id, full_name: fullName, username, must_change_password: true, disabled: false,
@@ -118,11 +119,12 @@ export async function resetUserPasswordAdmin({ data }: Input<{ userId: string }>
   const tempPassword = temporaryPassword();
   const result = await neonAuth.auth.admin.setUserPassword({ userId: data.userId, newPassword: tempPassword });
   unwrap(result, "Impossible de réinitialiser le mot de passe Neon.");
-  const { data: user, error: userError } = await neonAuth.auth.admin.getUser({ userId: data.userId });
-  if (userError) throw new Error("Mot de passe réinitialisé, mais l'adresse e-mail n'a pas pu être relue.");
+  const usersResult = await neonAuth.auth.admin.listUsers({ query: { limit: 200 } });
+  const usersData = unwrap<any>(usersResult, "Impossible de relire les comptes Neon.");
+  const user = (usersData?.users ?? []).find((item: any) => item.id === data.userId);
   const { error } = await supabase.from("profiles").update({ must_change_password: true }).eq("id", data.userId);
   if (error) throw new Error("Mot de passe réinitialisé, mais le profil n'a pas été mis à jour.");
-  return { email: user?.user?.email ?? "", tempPassword };
+  return { email: user?.email ?? "", tempPassword };
 }
 
 export async function updateUserAdmin({ data }: Input<{ userId: string; fullName: string; username: string }>) {
