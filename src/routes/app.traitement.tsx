@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/neon/client";
+import { uploadNeonObject, getNeonObjectUrl, deleteNeonObject } from "@/lib/storage";
 import { db, isBrowser } from "@/lib/db";
 import { polygonAreaM2, polygonPerimeterM } from "@/lib/gps";
 import { formatArea } from "@/lib/format";
@@ -89,7 +90,7 @@ function TraitementPage() {
           storage_path: path,
           size_bytes: file.size,
           status: isGeometryFile(file.name) ? "uploaded" : "archived",
-          created_by: auth.user?.id ?? null,
+          created_by: auth.user.id,
         });
         if (ins.error) toast.error(`${file.name} : ${ins.error.message}`);
       }
@@ -110,7 +111,7 @@ function TraitementPage() {
     if (!confirm(`Supprimer définitivement « ${f.file_name} » ?`)) return;
     setBusy(f.id);
     try {
-      if (f.storage_path) await supabase.storage.from("imports").remove([f.storage_path]);
+      if (f.storage_path) await deleteNeonObject("imports", f.storage_path);
       const { error } = await supabase.from("imports").delete().eq("id", f.id);
       if (error) { toast.error(error.message); return; }
       setImports((cur) => cur.filter((x) => x.id !== f.id));
@@ -149,8 +150,10 @@ function TraitementPage() {
   // ---- Fichiers archivés : téléchargement depuis le bucket puis traitement ----
   async function downloadFile(f: ImportRow): Promise<File | null> {
     if (!f.storage_path) { toast.error("Fichier introuvable dans le stockage"); return null; }
-    const { data, error } = await supabase.storage.from("imports").download(f.storage_path);
-    if (error || !data) { toast.error(error?.message ?? "Téléchargement impossible"); return null; }
+    const url = await getNeonObjectUrl("imports", f.storage_path);
+    const response = await fetch(url);
+    if (!response.ok) { toast.error("Téléchargement impossible"); return null; }
+    const data = await response.blob();
     return new File([data], f.file_name, { type: data.type || "application/octet-stream" });
   }
 
