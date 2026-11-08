@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Buffer } from "node:buffer";
-import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createClient } from "@neondatabase/neon-js";
 import { getNeonStorageClient } from "@/integrations/neon/storage.server";
@@ -35,13 +35,26 @@ export const Route = createFileRoute("/api/storage/presign")({
       );
       return json({ url, bucket, key, headers: { "Content-Type": contentType } });
     },
+    DELETE: async ({ request }) => {
+      const auth = await authenticate(request);
+      if (!auth) return json({ error: "unauthorized" }, 401);
+      let body: any;
+      try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+      const bucket = String(body?.bucket ?? "");
+      const key = String(body?.key ?? "");
+      if (!BUCKETS.has(bucket) || (!auth.isAdmin && !key.startsWith(`${auth.userId}/`))) {
+        return json({ error: "forbidden" }, 403);
+      }
+      await getNeonStorageClient().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+      return json({ ok: true });
+    },
     GET: async ({ request }) => {
       const auth = await authenticate(request);
       if (!auth) return json({ error: "unauthorized" }, 401);
       const params = new URL(request.url).searchParams;
       const bucket = params.get("bucket") ?? "";
       const key = params.get("key") ?? "";
-      if (!BUCKETS.has(bucket) || !key.startsWith(`${auth.userId}/`)) {
+      if (!BUCKETS.has(bucket) || (!auth.isAdmin && !key.startsWith(`${auth.userId}/`))) {
         return json({ error: "forbidden" }, 403);
       }
       const url = await getSignedUrl(
@@ -54,7 +67,7 @@ export const Route = createFileRoute("/api/storage/presign")({
   } },
 });
 
-async function authenticate(request: Request): Promise<{ userId: string } | null> {
+async function authenticate(request: Request): Promise<{ userId: string; isAdmin: boolean } | null> {
   const header = request.headers.get("authorization") ?? "";
   if (!header.startsWith("Bearer ")) return null;
   const token = header.slice(7).trim();
@@ -71,7 +84,9 @@ async function authenticate(request: Request): Promise<{ userId: string } | null
   const db = createClient({ dataApi: { url: dataApiUrl, getToken: async () => token } });
   const { data, error } = await db.from("profiles").select("id,disabled").eq("id", userId).maybeSingle();
   if (error || !data || data.disabled) return null;
-  return { userId };
+  const { data: roles, error: roleError } = await db.from("user_roles").select("role").eq("user_id", userId);
+  if (roleError || !roles?.length) return null;
+  return { userId, isAdmin: roles.some((r: any) => r.role === "admin") };
 }
 
 function json(data: unknown, status = 200) {
