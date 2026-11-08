@@ -6,7 +6,7 @@ import { PlanPreview } from "@/components/PlanPreview";
 import { SearchSelect } from "@/components/SearchSelect";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { db, isBrowser } from "@/lib/db";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/neon/client";
 import { refOfficielle } from "@/lib/ref";
 import { syncNow } from "@/lib/sync";
 import { buildPlan } from "@/lib/morcellement-engine";
