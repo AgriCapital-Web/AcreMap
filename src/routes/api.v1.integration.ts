@@ -78,7 +78,8 @@ export const Route = createFileRoute("/api/v1/integration")({
 });
 
 async function authenticate(request: Request): Promise<boolean> {
-  const authHeader = request.headers.get("authorization") ?? "";\n  const provided = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
+  const authHeader = request.headers.get("authorization") ?? "";
+  const provided = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
   if (!provided) return false;
   const providedHash = createHash("sha256").update(provided).digest();
   const expected = env("ACREMAP_CRM_API_KEY");
