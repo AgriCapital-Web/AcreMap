@@ -21,6 +21,6 @@ export async function changeOwnPassword(input: { currentPassword: string; passwo
     revokeOtherSessions: true,
   });
   if (result?.error) throw new Error(result.error.message ?? "Impossible de mettre à jour le mot de passe.");
-  await clearPasswordChangeFlag({ data: {} });
+  await clearPasswordChangeFlag();
   return { ok: true };
 }
