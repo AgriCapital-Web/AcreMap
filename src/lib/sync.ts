@@ -8,7 +8,7 @@ import type { Domaine, Lot, Measurement, MorcPlan, Parcelle, SP } from "./types"
 
 type TableName = OutboxEntry["table"];
 
-// ---- Row mappers (local shape → Supabase row) ----
+// ---- Row mappers (local shape → Neon row) ----
 function toIso(ts?: number | null): string | null {
   if (!ts && ts !== 0) return null;
   return new Date(ts).toISOString();
