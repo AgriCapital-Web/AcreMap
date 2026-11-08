@@ -33,3 +33,15 @@ export async function getNeonObjectUrl(bucket: "imports" | "photos", key: string
   const result = await response.json() as { url: string };
   return result.url;
 }
+
+export async function deleteNeonObject(bucket: "imports" | "photos", key: string): Promise<void> {
+  const { data, error } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (error || !token) throw new Error("Une session AcreMap est requise pour supprimer ce fichier.");
+  const response = await fetch("/api/storage/presign", {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ bucket, key }),
+  });
+  if (!response.ok) throw new Error("La suppression du fichier dans Neon Object Storage a échoué.");
+}
