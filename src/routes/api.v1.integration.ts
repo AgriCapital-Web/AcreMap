@@ -1,17 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import { getNeonSql } from "@/integrations/neon/db.server";
-
-function env(name: string) {
-  return process.env.VERCEL_ENV === "production"
-    ? process.env[name]
-    : process.env[`${name}_DEV`] ?? process.env[name];
-}
 
 export const Route = createFileRoute("/api/v1/integration")({
   server: { handlers: {
     GET: async ({ request }) => {
-      if (!authenticate(request)) return json({ error: "unauthorized" }, 401);
+      if (!(await authenticate(request))) return json({ error: "unauthorized" }, 401);
       const sql = getNeonSql();
       const resource = new URL(request.url).searchParams.get("resource") ?? "health";
       try {
@@ -37,7 +31,7 @@ export const Route = createFileRoute("/api/v1/integration")({
       }
     },
     POST: async ({ request }) => {
-      if (!authenticate(request)) return json({ error: "unauthorized" }, 401);
+      if (!(await authenticate(request))) return json({ error: "unauthorized" }, 401);
       let body: any;
       try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
       if (body?.event !== "owners.sync" || !Array.isArray(body.owners) || body.owners.length > 5000) return json({ error: "invalid_payload" }, 400);
@@ -77,11 +71,18 @@ export const Route = createFileRoute("/api/v1/integration")({
   } },
 });
 
-function authenticate(request: Request): boolean {
-  const expected = env("ACREMAP_CRM_API_KEY");
-  const provided = request.headers.get("authorization")?.replace(/^Bearer\\s+/i, "") ?? "";
-  if (!expected || !provided) return false;
-  return timingSafeEqual(createHash("sha256").update(expected).digest(), createHash("sha256").update(provided).digest());
+async function authenticate(request: Request): Promise<boolean> {
+  const authHeader = request.headers.get("authorization") ?? "";
+  const provided = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
+  if (!provided) return false;
+  const providedHash = createHash("sha256").update(provided).digest();
+  try {
+    const sql = getNeonSql();
+    const rows = await sql`SELECT id FROM public.crm_api_keys WHERE key_hash = ${providedHash.toString("hex")} AND revoked_at IS NULL LIMIT 1`;
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
 }
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });

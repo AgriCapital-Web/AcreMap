@@ -1,0 +1,52 @@
+name: AcreMap dependency refresh
+
+on:
+  push:
+    branches: [feat/crm-secure-pairing-and-deps]
+    paths-ignore:
+      - package-lock.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install and resolve compatible updates
+        run: |
+          npm install
+          for pkg in core-js esbuild; do npm install-scripts approve "$pkg"; done
+          npm rebuild
+          npm update
+          npm audit fix || true
+      - name: Build
+        run: npm run build
+      - name: TypeScript
+        run: npm run check
+      - name: Audit remaining advisories
+        run: |
+          npm audit --json > npm-audit.json || true
+          node -e "const a=require('./npm-audit.json'); console.log(JSON.stringify({metadata:a.metadata?.vulnerabilities, advisories:Object.entries(a.vulnerabilities||{}).map(([name,v])=>({name,severity:v.severity,range:v.range,fixAvailable:v.fixAvailable}))},null,2))"
+      - name: Save lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(deps): refresh compatible dependencies and security fixes"
+            git push
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: acremap-npm-audit
+          path: npm-audit.json
+          if-no-files-found: ignore

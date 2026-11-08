@@ -1,6 +1,7 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { createServerFn } from "@tanstack/react-start";
 import { requireNeonAuth } from "@/integrations/neon/auth-middleware";
+import { getNeonSql } from "@/integrations/neon/db.server";
 
 type WebhookLot = {
   id: string; plan_id: string; parcelle_id: string; measurement_id: string; code: string;
@@ -24,18 +25,21 @@ export const publishMorcellementToCrm = createServerFn({ method: "POST" })
     return input;
   })
   .handler(async ({ data }) => {
-    const endpoint = integrationEnv("CRM_WEBHOOK_URL")?.trim();
-    const secret = integrationEnv("CRM_WEBHOOK_SECRET");
-    const enabled = integrationEnv("CRM_INTEGRATION_ENABLED") === "true";
+    const sql = getNeonSql();
+    const [config] = await sql`SELECT webhook_url, enabled FROM public.crm_integration_config WHERE id = 1`;
+    const [storedSecret] = await sql`SELECT secret FROM public.crm_integration_secrets WHERE id = 'webhook_hmac'`;
+    const endpoint = (config?.webhook_url ?? integrationEnv("CRM_WEBHOOK_URL"))?.trim();
+    const secret = storedSecret?.secret ?? integrationEnv("CRM_WEBHOOK_SECRET");
+    const enabled = config ? config.enabled === true : integrationEnv("CRM_INTEGRATION_ENABLED") === "true";
     if (!enabled) return { sent: false, configured: Boolean(endpoint && secret), disabled: true };
     if (!endpoint || !secret) return { sent: false, configured: false };
     let url: URL;
-    try { url = new URL(endpoint); } catch { throw new Error("CRM_WEBHOOK_URL n'est pas une URL valide."); }
-    if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") throw new Error("Le webhook CRM doit utiliser HTTPS.");
+    try { url = new URL(endpoint); } catch { throw new Error("L'URL du webhook CRM n'est pas valide."); }
+    if (url.protocol !== "https:") throw new Error("Le webhook CRM doit utiliser HTTPS.");
     const assignedOwnerIds = [...new Set(data.lots.map((lot) => lot.assignee_owner_id).filter((id): id is string => Boolean(id)))];
     const ownerId = data.plan.owner_id ?? (assignedOwnerIds.length === 1 ? assignedOwnerIds[0] : null);
     const environment = process.env.VERCEL_ENV === "production" ? "production" : "development";
-    const payload = JSON.stringify({ event: "morcellement.published", event_id: randomUUID(), occurred_at: new Date().toISOString(), owner_id: ownerId, plan: { ...data.plan, owner_id: ownerId }, lots: data.lots });
+    const payload = JSON.stringify({ event: "morcellement.published", event_id: data.plan.id + ":" + data.plan.updated_at, occurred_at: new Date().toISOString(), owner_id: ownerId, plan: { ...data.plan, owner_id: ownerId }, lots: data.lots });
     const signature = createHmac("sha256", secret).update(payload).digest("hex");
     const response = await fetch(url.toString(), {
       method: "POST",
