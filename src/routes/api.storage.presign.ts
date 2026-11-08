@@ -19,6 +19,7 @@ export const Route = createFileRoute("/api/storage/presign")({
       const fileName = String(body?.fileName ?? "");
       const contentType = String(body?.contentType ?? "application/octet-stream");
       const size = Number(body?.size ?? 0);
+      if (!auth.canUpload) return json({ error: "forbidden" }, 403);
       if (!BUCKETS.has(bucket) || !fileName || !Number.isFinite(size) || size < 1 || size > MAX_BYTES) {
         return json({ error: "invalid_upload_request" }, 400);
       }
@@ -67,7 +68,7 @@ export const Route = createFileRoute("/api/storage/presign")({
   } },
 });
 
-async function authenticate(request: Request): Promise<{ userId: string; isAdmin: boolean } | null> {
+async function authenticate(request: Request): Promise<{ userId: string; isAdmin: boolean; canUpload: boolean } | null> {
   const header = request.headers.get("authorization") ?? "";
   if (!header.startsWith("Bearer ")) return null;
   const token = header.slice(7).trim();
@@ -86,7 +87,7 @@ async function authenticate(request: Request): Promise<{ userId: string; isAdmin
   if (error || !data || data.disabled) return null;
   const { data: roles, error: roleError } = await db.from("user_roles").select("role").eq("user_id", userId);
   if (roleError || !roles?.length) return null;
-  return { userId, isAdmin: roles.some((r: any) => r.role === "admin") };
+  return { userId, isAdmin: roles.some((r: any) => r.role === "admin"), canUpload: roles.some((r: any) => r.role === "admin" || r.role === "agent") };
 }
 
 function json(data: unknown, status = 200) {
