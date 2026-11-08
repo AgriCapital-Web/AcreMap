@@ -96,9 +96,9 @@ function IntegrationSettingsPage() {
 
     <section className="space-y-3 rounded-xl border bg-card p-3 sm:p-5">
       <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-semibold">3. Intégration CRM</h2>
-        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${crmEnabled ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>{crmEnabled ? "Activée" : "Configurée — désactivée en développement"}</span>
+        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${crmEnabled ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>{crmEnabled ? "Dry-run actif — aucune persistance CRM" : "Configurée — désactivée en développement"}</span>
       </div>
-      <p className="text-sm text-muted-foreground">Les clés de développement sont préparées. Les échanges de données restent désactivés pour éviter d'envoyer des données réelles du CRM dans la base de test. La configuration de production n'est pas modifiée.</p>
+      <p className="text-sm text-muted-foreground">En développement, les événements sont envoyés au webhook CRM avec une signature HMAC. Le CRM vérifie la signature et la structure du plan en mode dry-run, sans enregistrer les données. La configuration de production reste inchangée.</p>
       <p className="text-xs text-muted-foreground">Domaine de production réservé au futur basculement : https://acremap.agricapital.ci</p>
     </section>
   </div>;
