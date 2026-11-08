@@ -109,13 +109,11 @@
     "@neondatabase/auth": {
       "better-auth": "1.7.7",
       "@better-auth/core": "1.7.7",
-      "@better-auth/oauth-provider": "1.7.7",
-      "zod": "4.6.7"
+      "@better-auth/oauth-provider": "1.7.7"
     },
     "@neondatabase/auth-ui": {
       "better-auth": "1.7.7",
-      "@better-auth/passkey": "1.7.7",
-      "zod": "4.6.7"
+      "@better-auth/passkey": "1.7.7"
     }
   }
 }
