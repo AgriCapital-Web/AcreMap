@@ -40,8 +40,6 @@ function LoginPage() {
   const [p, setP] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [otp, setOtp] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
 
   useEffect(() => {
     if (hydrated && user) {
@@ -57,40 +55,6 @@ function LoginPage() {
     try {
       const me = await signIn(u, p);
       if ((me as { mustChangePassword?: boolean }).mustChangePassword) navigate({ to: "/app/change-password" });
-      else goAfterAuth();
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally { setLoading(false); }
-  }
-
-  async function sendSignInCode() {
-    if (!u.trim()) { setErr("Saisissez d'abord votre adresse e-mail."); return; }
-    setErr(null); setLoading(true);
-    try {
-      const { error } = await neonAuth.auth.emailOtp.sendVerificationOtp({
-        email: u.trim(),
-        type: "sign-in",
-      });
-      if (error) throw new Error(error.message || "Impossible d'envoyer le code.");
-      setOtpSent(true);
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally { setLoading(false); }
-  }
-
-  async function verifySignInCode() {
-    if (!otp.trim()) { setErr("Saisissez le code reçu par e-mail."); return; }
-    setErr(null); setLoading(true);
-    try {
-      const { data, error } = await neonAuth.auth.signIn.emailOtp({
-        email: u.trim(),
-        otp: otp.trim(),
-      });
-      if (error || !data?.user) throw new Error(error?.message || "Code invalide ou expiré.");
-      await useAuth.getState().refreshProfile();
-      const me = useAuth.getState().user;
-      if (!me) throw new Error("La session est créée, mais le profil AcreMap n'a pas pu être chargé.");
-      if (me.mustChangePassword) navigate({ to: "/app/change-password" });
       else goAfterAuth();
     } catch (e) {
       setErr((e as Error).message);
@@ -141,31 +105,6 @@ function LoginPage() {
               <input type="password" value={p} onChange={(e) => setP(e.target.value)} required autoComplete="current-password"
                 className="mt-1 w-full h-11 px-3 rounded-lg border border-input bg-card focus:outline-none focus:ring-2 focus:ring-ring" />
             </label>
-          </div>
-
-          <div className="space-y-2 rounded-lg border border-border p-3">
-            <div className="text-sm font-medium">Connexion sécurisée par code e-mail</div>
-            <p className="text-xs text-muted-foreground">Utile pour activer votre premier accès administrateur sans mot de passe provisoire.</p>
-            {!otpSent ? (
-              <button disabled={loading || !u.trim()} type="button" onClick={sendSignInCode}
-                className="w-full h-10 rounded-lg border border-primary text-primary font-medium hover:bg-primary/5 disabled:opacity-60">
-                {loading ? "Envoi en cours…" : "Recevoir un code de connexion"}
-              </button>
-            ) : (
-              <div className="space-y-2">
-                <label className="block">
-                  <span className="text-xs font-medium text-muted-foreground">Code reçu par e-mail</span>
-                  <input value={otp} onChange={(e) => setOtp(e.target.value)} inputMode="numeric" autoComplete="one-time-code"
-                    className="mt-1 w-full h-11 px-3 rounded-lg border border-input bg-card focus:outline-none focus:ring-2 focus:ring-ring" />
-                </label>
-                <button disabled={loading || !otp.trim()} type="button" onClick={verifySignInCode}
-                  className="w-full h-10 rounded-lg bg-primary text-primary-foreground font-semibold disabled:opacity-60">
-                  {loading ? "Vérification…" : "Valider le code"}
-                </button>
-                <button disabled={loading} type="button" onClick={sendSignInCode}
-                  className="w-full text-xs text-muted-foreground underline disabled:opacity-60">Renvoyer un code</button>
-              </div>
-            )}
           </div>
 
           {err && <div className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">{err}</div>}
